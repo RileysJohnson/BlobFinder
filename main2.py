@@ -1,61 +1,55 @@
-# ========================================================================
-# main.py - Main entry point
-# ========================================================================
+"""
+Main entry point for Hessian Blob Particle Detection Suite
+Complete Igor Pro port with GUI application
+"""
 
 # !/usr/bin/env python3
-"""
-Hessian Blob Particle Detection Suite - Python Port
-Copyright 2019 by The Curators of the University of Missouri, a public corporation
-
-G.M. King Laboratory
-University of Missouri-Columbia
-Originally created by: Brendan Marsh
-Email: marshbp@stanford.edu
-Ported by: Riley Johnson
-
-Main entry point for the Hessian Blob Detection Suite.
-Run this file to start the GUI application.
-"""
 
 import sys
 import os
 import warnings
 
-# Add project root to path
+# Add the project root to the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Configure matplotlib for thread safety
-import matplotlib
-
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-
-plt.rcParams['figure.raise_window'] = False
-plt.ioff()  # Turn off interactive mode
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
-from gui.main_window import HessianBlobGUI
-from core.error_handling import handle_error, safe_print
+# Set matplotlib backend before any GUI imports
+import matplotlib
+
+matplotlib.use('TkAgg')
+matplotlib.rcParams['figure.raise_window'] = False
+
+# Import main application
+from hessian_blobs.main_functions import HessianBlobGUI
 
 
 def main():
-    """Main function to run the Hessian Blob Detection Suite."""
+    """Main function to run the Hessian Blob Detection Suite"""
     try:
-        safe_print("Starting Hessian Blob Detection Suite...")
+        print("Starting Hessian Blob Particle Detection Suite...")
+        print("Python Port of Igor Pro Code by Brendan Marsh")
+        print("G.M. King Laboratory, University of Missouri-Columbia")
+        print("=" * 60)
 
         # Create and run application
         app = HessianBlobGUI()
         app.run()
 
     except Exception as e:
-        error_msg = handle_error("main", e)
+        print(f"Application Error: {e}")
+        import traceback
+        traceback.print_exc()
+
         try:
-            import tkinter.messagebox as messagebox
-            messagebox.showerror("Application Error", error_msg)
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Application Error", str(e))
         except:
-            print(error_msg)
+            pass
 
 
 if __name__ == "__main__":

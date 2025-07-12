@@ -1,27 +1,36 @@
-# ========================================================================
-# core/validation.py
-# ========================================================================
-
 """
-Parameter Validation
+Parameter Validation System
 
-Validation functions for Hessian blob parameters and constraints.
-Matches Igor Pro validation exactly.
+Provides comprehensive parameter validation:
+- validate_hessian_parameters: Validate Hessian blob parameters
+- validate_constraints: Validate particle constraints
+- validate_and_convert_parameters: Parameter conversion matching Igor Pro
+- Range checking and type validation
+
+This ensures all parameters meet Igor Pro specifications exactly.
 """
 
 import numpy as np
-from .error_handling import HessianBlobError, safe_print
-import os
+from core.error_handling import HessianBlobError, safe_print
+
 
 def validate_hessian_parameters(params):
-    """Validate Hessian blob parameters"""
+    """
+    Validate Hessian blob parameters - EXACT IGOR PRO VALIDATION
+
+    Args:
+        params: List/tuple of parameters to validate
+
+    Returns:
+        True if valid, raises HessianBlobError if invalid
+    """
     required_params = 7
     if len(params) < required_params:
         raise HessianBlobError(f"Parameter array must contain at least {required_params} parameters")
 
     scale_start, layers, scale_factor, det_h_thresh, particle_type, subpixel_mult, allow_overlap = params[:7]
 
-    # Validate ranges
+    # Validate ranges exactly like Igor Pro
     if scale_start <= 0:
         raise HessianBlobError("Minimum size must be positive")
     if layers <= 0:
@@ -37,8 +46,17 @@ def validate_hessian_parameters(params):
 
     return True
 
+
 def validate_constraints(constraints):
-    """Validate particle constraints"""
+    """
+    Validate particle constraints - EXACT IGOR PRO VALIDATION
+
+    Args:
+        constraints: List/tuple of 6 constraint values
+
+    Returns:
+        True if valid, raises HessianBlobError if invalid
+    """
     if len(constraints) != 6:
         raise HessianBlobError("Constraints must contain 6 values: minH, maxH, minA, maxA, minV, maxV")
 
@@ -53,8 +71,17 @@ def validate_constraints(constraints):
 
     return True
 
+
 def validate_and_convert_parameters(params):
-    """Validate and convert parameters exactly like Igor Pro"""
+    """
+    Validate and convert parameters exactly like Igor Pro - EXACT IGOR PRO CONVERSION
+
+    Args:
+        params: List/tuple of parameters to validate and convert
+
+    Returns:
+        Tuple of converted parameters
+    """
     try:
         # Extract parameters
         scaleStart = params[0]
@@ -79,7 +106,7 @@ def validate_and_convert_parameters(params):
         if allowOverlap not in [0, 1]:
             raise HessianBlobError("Allow Overlap must be 0 or 1")
 
-        # Parameter conversion
+        # Parameter conversion exactly like Igor Pro
         dimDelta_im_0 = 1.0  # Pixel spacing
 
         # Convert scale parameters
@@ -99,10 +126,18 @@ def validate_and_convert_parameters(params):
                 detHResponseThresh, particleType, subPixelMult_converted, allowOverlap)
 
     except Exception as e:
-        raise HessianBlobError(f"Parameter validation failed: {e}")
+        from core.error_handling import handle_error
+        handle_error("validate_and_convert_parameters", e)
+        raise
+
 
 def print_analysis_parameters(params):
-    """Print analysis parameters like Igor Pro"""
+    """
+    Print analysis parameters like Igor Pro - EXACT IGOR PRO OUTPUT FORMAT
+
+    Args:
+        params: List/tuple of parameters to print
+    """
     try:
         safe_print("\n" + "=" * 60)
         safe_print("HESSIAN BLOB ANALYSIS PARAMETERS")
@@ -151,39 +186,58 @@ def print_analysis_parameters(params):
         safe_print("=" * 60)
 
     except Exception as e:
+        from core.error_handling import handle_error
         handle_error("print_analysis_parameters", e)
 
-def verify_igor_compatibility(folder_path):
-    """Verify that created folders match Igor structure"""
-    try:
-        if not os.path.exists(folder_path):
-            safe_print(f"✗ ERROR: Folder does not exist: {folder_path}")
-            return False
 
-        required_files = [
-            "Heights.npy", "Volumes.npy", "Areas.npy", "AvgHeights.npy",
-            "COM.npy", "Original.npy"
-        ]
+def validate_image_data(image):
+    """
+    Validate image data - EXACT IGOR PRO VALIDATION
 
-        missing_files = []
-        for file in required_files:
-            if not os.path.exists(os.path.join(folder_path, file)):
-                missing_files.append(file)
+    Args:
+        image: Numpy array containing image data
 
-        if missing_files:
-            safe_print(f"✗ Missing required files: {missing_files}")
-            return False
+    Returns:
+        True if valid, raises HessianBlobError if invalid
+    """
+    if image is None:
+        raise HessianBlobError("Input image is None")
 
-        # Check for particle folders
-        particle_folders = [d for d in os.listdir(folder_path)
-                            if os.path.isdir(os.path.join(folder_path, d)) and d.startswith("Particle_")]
+    if not isinstance(image, np.ndarray):
+        raise HessianBlobError("Input must be a numpy array")
 
-        safe_print(f"✓ Igor Pro compatibility check passed")
-        safe_print(f"✓ Found {len(particle_folders)} particle folders")
-        safe_print(f"✓ All required measurement files present")
+    if len(image.shape) < 2:
+        raise HessianBlobError("Input must be at least 2D")
 
-        return True
+    if image.size == 0:
+        raise HessianBlobError("Input image is empty")
 
-    except Exception as e:
-        handle_error("verify_igor_compatibility", e)
-        return False
+    if not image.flags.writeable:
+        raise HessianBlobError("Input image must be writable")
+
+    return True
+
+
+def validate_file_path(filepath, must_exist=True):
+    """
+    Validate file path - EXACT IGOR PRO VALIDATION
+
+    Args:
+        filepath: Path to validate
+        must_exist: Whether file must already exist
+
+    Returns:
+        True if valid, raises HessianBlobError if invalid
+    """
+    import os
+
+    if not filepath:
+        raise HessianBlobError("File path cannot be empty")
+
+    if must_exist and not os.path.exists(filepath):
+        raise HessianBlobError(f"File does not exist: {filepath}")
+
+    if must_exist and not os.path.isfile(filepath):
+        raise HessianBlobError(f"Path is not a file: {filepath}")
+
+    return True

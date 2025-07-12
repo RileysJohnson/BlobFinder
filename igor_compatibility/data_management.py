@@ -1,121 +1,187 @@
-# ========================================================================
-# igor_compatibility/data_management.py
-# ========================================================================
-
 """
-Data Management
+Igor Pro Data Management Compatibility Layer
 
-Igor Pro-compatible data folder management and file I/O operations.
-Maintains the exact Igor Pro workflow and folder structure.
+Provides Igor Pro-compatible data folder management:
+- SetDataFolder/GetDataFolder: Current folder tracking
+- DataFolderExists: Check folder existence
+- NewDataFolder: Create Igor-style folders
+- UniqueName: Generate unique names
+- Data organization matching Igor Pro exactly
+
+This maintains the exact folder structure expected by Igor Pro users.
 """
 
 import os
-import numpy as np
-import json
-import datetime
-from typing import Dict, Optional
-try:
-    import igor.binarywave as bw
-except ImportError:
-    bw = None
-from PIL import Image
-from core.error_handling import handle_error, safe_print, HessianBlobError
+import sys
+from core.error_handling import handle_error, safe_print
 
-class DataManager:
-    """Manages file I/O and data folder organization"""
 
-    @staticmethod
-    def create_igor_folder_structure(base_path: str, folder_type: str = "particles") -> str:
-        """Create Igor Pro-compatible folder structure"""
-        try:
-            os.makedirs(base_path, exist_ok=True)
+def get_script_directory():
+    """Get the directory where the script is located"""
+    try:
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            return script_dir
+    except Exception:
+        return os.getcwd()
 
-            if folder_type == "particles":
-                # Create standard particle analysis structure
-                subdirs = []
-            elif folder_type == "series":
-                # Series analysis doesn't need subdirs initially
-                subdirs = []
 
-            for subdir in subdirs:
-                os.makedirs(os.path.join(base_path, subdir), exist_ok=True)
+# Global variable to track current data folder
+current_data_folder = None
 
-            safe_print(f"Created Igor Pro folder structure: {base_path}")
-            return base_path
 
-        except Exception as e:
-            raise HessianBlobError(f"Failed to create folder structure: {e}")
+def SetDataFolder(folder_path):
+    """
+    Set current data folder - EXACT IGOR PRO BEHAVIOR
 
-    @staticmethod
-    def save_wave_data(data: np.ndarray, filepath: str, wave_info: Dict = None) -> bool:
-        """Save wave data in Igor Pro-compatible format"""
-        try:
-            # Save as .npy for Python compatibility
-            np.save(filepath, data)
+    Args:
+        folder_path: Path to set as current data folder
+    """
+    try:
+        global current_data_folder
 
-            # Save metadata if provided
-            if wave_info:
-                metadata_file = filepath.replace('.npy', '_info.json')
-                with open(metadata_file, 'w') as f:
-                    json.dump(wave_info, f, indent=2, default=str)
+        # Clean up the path to avoid issues with spaces
+        if folder_path:
+            folder_path = os.path.normpath(folder_path)
+            # Ensure we're always working with absolute paths
+            if not os.path.isabs(folder_path):
+                folder_path = os.path.join(get_script_directory(), folder_path)
+            current_data_folder = folder_path
+            safe_print(f"Set data folder to: {folder_path}")
+        else:
+            current_data_folder = get_script_directory()
+            safe_print(f"Set data folder to script directory: {current_data_folder}")
 
-            return True
+    except Exception as e:
+        handle_error("SetDataFolder", e)
+        current_data_folder = get_script_directory()
 
-        except Exception as e:
-            handle_error("save_wave_data", e, f"file: {filepath}")
-            return False
 
-    @staticmethod
-    def load_image_file(filepath: str) -> Optional[np.ndarray]:
-        """Load image from various formats"""
-        try:
-            if not os.path.exists(filepath):
-                raise FileNotFoundError(f"File not found: {filepath}")
+def GetDataFolder(level):
+    """
+    Get current data folder - EXACT IGOR PRO BEHAVIOR
 
-            file_ext = os.path.splitext(filepath)[1].lower()
+    Args:
+        level: Data folder level (1 for current)
 
-            if file_ext == '.ibw' and bw is not None:
-                wave = bw.load(filepath)
-                image_data = wave['wave']['wData']
-                if not image_data.flags.writeable:
-                    image_data = image_data.copy()
-                return image_data
-            elif file_ext == '.npy':
-                image_data = np.load(filepath)
-                if not image_data.flags.writeable:
-                    image_data = image_data.copy()
-                return image_data
-            elif file_ext in ['.tiff', '.tif', '.png', '.jpg', '.jpeg']:
-                img = Image.open(filepath)
-                image_data = np.array(img)
-                if not image_data.flags.writeable:
-                    image_data = image_data.copy()
-                return image_data
+    Returns:
+        Current data folder path
+    """
+    global current_data_folder
+    if current_data_folder is None:
+        current_data_folder = get_script_directory()
+    return current_data_folder
+
+
+def DataFolderExists(folder_path):
+    """
+    Check if data folder exists - EXACT IGOR PRO BEHAVIOR
+
+    Args:
+        folder_path: Path to check
+
+    Returns:
+        True if folder exists, False otherwise
+    """
+    try:
+        return os.path.exists(folder_path) if folder_path else False
+
+    except Exception as e:
+        handle_error("DataFolderExists", e)
+        return False
+
+
+def NewDataFolder(folder_path):
+    """
+    Create new data folder - EXACT IGOR PRO BEHAVIOR
+
+    Args:
+        folder_path: Path to create
+
+    Returns:
+        Created folder path
+    """
+    try:
+        # If it's not an absolute path, make it relative to script directory
+        if not os.path.isabs(folder_path):
+            folder_path = os.path.join(get_script_directory(), folder_path)
+
+        os.makedirs(folder_path, exist_ok=True)
+        safe_print(f"Created data folder: {folder_path}")
+        return folder_path
+
+    except Exception as e:
+        handle_error("NewDataFolder", e)
+        return ""
+
+
+def UniqueName(base_name, type_num, mode):
+    """
+    Generate unique name - EXACT IGOR PRO BEHAVIOR
+
+    Args:
+        base_name: Base name for uniqueness
+        type_num: Type number (11 for folder)
+        mode: Mode (2 for folder creation)
+
+    Returns:
+        Unique name string
+    """
+    try:
+        current_dir = GetDataFolder(1)
+
+        # Clean the base name
+        base_name = base_name.replace(":", "_").strip()
+
+        counter = 0
+        while True:
+            if counter == 0:
+                test_name = base_name
             else:
-                raise HessianBlobError(f"Unsupported file format: {file_ext}")
+                test_name = f"{base_name}_{counter}"
 
-        except Exception as e:
-            handle_error("load_image_file", e, f"file: {filepath}")
-            return None
+            # Check in current directory
+            test_path = os.path.join(current_dir, test_name)
+            if not os.path.exists(test_path):
+                return test_name
+            counter += 1
 
-    @staticmethod
-    def create_particle_info(particle_data: Dict, particle_id: int) -> Dict:
-        """Create particle information dictionary matching Igor format"""
-        info = {
-            'Parent': particle_data.get('parent', 'image'),
-            'Date': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'Height': float(particle_data.get('height', 0)),
-            'Avg Height': float(particle_data.get('avg_height', 0)),
-            'Volume': float(particle_data.get('volume', 0)),
-            'Area': float(particle_data.get('area', 0)),
-            'Perimeter': float(particle_data.get('perimeter', 0)),
-            'Scale': float(particle_data.get('scale', 0)),
-            'xCOM': float(particle_data.get('com', [0, 0])[0]),
-            'yCOM': float(particle_data.get('com', [0, 0])[1]),
-            'pSeed': int(particle_data.get('p_seed', 0)),
-            'qSeed': int(particle_data.get('q_seed', 0)),
-            'rSeed': int(particle_data.get('r_seed', 0)),
-            'subPixelXCenter': float(particle_data.get('p_seed', 0)),
-            'subPixelYCenter': float(particle_data.get('q_seed', 0))
-        }
-        return info
+            # Prevent infinite loops
+            if counter > 1000:
+                break
+
+        return f"{base_name}_error"
+
+    except Exception as e:
+        handle_error("UniqueName", e)
+        return f"{base_name}_error"
+
+
+def CountObjects(folder_path, object_type):
+    """
+    Count objects in folder - EXACT IGOR PRO BEHAVIOR
+
+    Args:
+        folder_path: Path to folder
+        object_type: Type of objects to count (1 for waves/images)
+
+    Returns:
+        Number of objects found
+    """
+    try:
+        if not os.path.exists(folder_path):
+            return 0
+
+        if object_type == 1:  # Count image files
+            count = 0
+            for ext in ['.ibw', '.tiff', '.tif', '.png', '.jpg', '.jpeg', '.npy']:
+                count += len([f for f in os.listdir(folder_path)
+                              if f.lower().endswith(ext.lower())])
+            return count
+        return 0
+
+    except Exception as e:
+        handle_error("CountObjects", e)
+        return 0
