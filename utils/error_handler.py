@@ -1,3 +1,15 @@
+"""Handles errors, custom exceptions, and safe printing."""
+
+# #######################################################################
+#                      UTILITIES: ERROR HANDLING
+#
+#   CONTENTS:
+#       - class HessianBlobError: Custom exception for application errors.
+#       - def safe_print: Thread-safe printing for GUI applications.
+#       - def handle_error: Centralized function to log and format errors.
+#
+# #######################################################################
+
 import sys
 import os
 

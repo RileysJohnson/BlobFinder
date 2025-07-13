@@ -1,6 +1,22 @@
+"""Contains utilities to replicate Igor Pro functions and folder logic."""
+
+# #######################################################################
+#                 UTILITIES: IGOR PRO COMPATIBILITY
+#
+#   CONTENTS:
+#       - get_script_directory: Gets the location of the running script.
+#       - SetDataFolder/GetDataFolder: Manages the current working directory.
+#       - GetBrowserSelection: Simulates Igor's folder selection dialog.
+#       - CountObjects: Counts image files in a folder.
+#       - WaveRefIndexedDFR: Loads an image by its index in a folder.
+#       - NameOfWave: Gets a descriptive name for a data object.
+#       - NewDataFolder/UniqueName: Creates unique folder/file names.
+#       - verify_folder_structure: Verifies output folder structure.
+#
+# #######################################################################
+
 import os
 import sys
-import tkinter as tk
 from tkinter import filedialog
 from .error_handler import handle_error, safe_print
 from .data_manager import DataManager
