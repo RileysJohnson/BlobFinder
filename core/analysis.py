@@ -13,6 +13,7 @@
 
 import numpy as np
 import os
+import json
 from tkinter import filedialog, messagebox
 from utils.data_manager import DataManager
 from utils.igor_compat import (

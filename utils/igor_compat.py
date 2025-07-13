@@ -17,6 +17,7 @@
 
 import os
 import sys
+import numpy as np
 from tkinter import filedialog
 from .error_handler import handle_error, safe_print
 from .data_manager import DataManager
