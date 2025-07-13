@@ -413,13 +413,6 @@ def HessianBlobs(im, params=None):
         particle_map = np.full_like(im, -1)
         DataManager.save_wave_data(particle_map, os.path.join(new_df, "ParticleMap.npy"))
 
-        # Final summary
-        safe_print(f"Analysis complete. {count} particles detected and measured.")
-        if count > 0:
-            safe_print(f"Average height: {np.mean(heights):.3e}")
-            safe_print(f"Average volume: {np.mean(volumes):.3e}")
-            safe_print(f"Average area: {np.mean(areas):.3e}")
-
         # Verify folder structure
         verify_igor_compatibility(new_df)
         SetDataFolder(current_df)
@@ -761,76 +754,13 @@ def WaveStats(data_file):
         messagebox.showerror("Statistics Error", error_msg)
         return None
 
-def print_series_analysis_summary(result_folder):
-    """Print comprehensive series analysis summary matching Igor Pro exactly"""
+def print_series_analysis_summary(result_folder, heights, volumes, areas):
+    """Print series summary matching Igor Pro exactly"""
     try:
-        safe_print("\n" + "=" * 70)
-        safe_print("SERIES ANALYSIS COMPLETE")
-        safe_print("=" * 70)
-
-        # Load all measurement arrays
-        heights_file = os.path.join(result_folder, "AllHeights.npy")
-        volumes_file = os.path.join(result_folder, "AllVolumes.npy")
-        areas_file = os.path.join(result_folder, "AllAreas.npy")
-        avg_heights_file = os.path.join(result_folder, "AllAvgHeights.npy")
-
-        if not all(os.path.exists(f) for f in [heights_file, volumes_file, areas_file, avg_heights_file]):
-            safe_print("Warning: Some measurement files not found")
-            return
-
-        heights = np.load(heights_file)
-        volumes = np.load(volumes_file)
-        areas = np.load(areas_file)
-        avg_heights = np.load(avg_heights_file)
-
-        # Print summary statistics exactly like Igor Pro
-        safe_print(f"Total particles detected: {len(heights)}")
-        safe_print(f"Results saved to: {result_folder}")
-        safe_print("")
-
         if len(heights) > 0:
-            safe_print("PARTICLE MEASUREMENT STATISTICS:")
-            safe_print("-" * 50)
-
-            # Heights statistics
-            safe_print(f"Heights (n={len(heights)}):")
-            safe_print(f"  Mean: {np.mean(heights):.6e} m")
-            safe_print(f"  Std:  {np.std(heights, ddof=1):.6e} m")
-            safe_print(f"  Min:  {np.min(heights):.6e} m")
-            safe_print(f"  Max:  {np.max(heights):.6e} m")
-            safe_print("")
-
-            # Volumes statistics
-            safe_print(f"Volumes (n={len(volumes)}):")
-            safe_print(f"  Mean: {np.mean(volumes):.6e} m³")
-            safe_print(f"  Std:  {np.std(volumes, ddof=1):.6e} m³")
-            safe_print(f"  Min:  {np.min(volumes):.6e} m³")
-            safe_print(f"  Max:  {np.max(volumes):.6e} m³")
-            safe_print("")
-
-            # Areas statistics
-            safe_print(f"Areas (n={len(areas)}):")
-            safe_print(f"  Mean: {np.mean(areas):.6e} m²")
-            safe_print(f"  Std:  {np.std(areas, ddof=1):.6e} m²")
-            safe_print(f"  Min:  {np.min(areas):.6e} m²")
-            safe_print(f"  Max:  {np.max(areas):.6e} m²")
-            safe_print("")
-
-        # Print file structure created
-        safe_print("FILES CREATED:")
-        safe_print("-" * 20)
-        safe_print("• AllHeights.npy    - Combined particle heights")
-        safe_print("• AllVolumes.npy    - Combined particle volumes")
-        safe_print("• AllAreas.npy      - Combined particle areas")
-        safe_print("• AllAvgHeights.npy - Combined average heights")
-        safe_print("• Parameters.npy    - Analysis parameters used")
-
-        # Count individual image folders
-        image_folders = [d for d in os.listdir(result_folder)
-                         if os.path.isdir(os.path.join(result_folder, d)) and d.endswith('_Particles')]
-        safe_print(f"• {len(image_folders)} individual image analysis folders")
-
-        safe_print("\n" + "=" * 70)
+            safe_print(f"Series complete. Total particles detected: {len(heights)}")
+        else:
+            safe_print("Series complete. Total particles detected: 0")
 
     except Exception as e:
         handle_error("print_series_analysis_summary", e)

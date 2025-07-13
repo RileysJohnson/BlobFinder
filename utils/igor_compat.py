@@ -21,17 +21,27 @@ from tkinter import filedialog
 from .error_handler import handle_error, safe_print
 from .data_manager import DataManager
 
+
 def get_script_directory():
-    """Get the directory where the script is located"""
+    """Get the directory where main.py is located"""
     try:
         if getattr(sys, 'frozen', False):
             return os.path.dirname(sys.executable)
         else:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            # Ensure we return a clean path without spaces in folder names
-            return script_dir
+            # Go up from utils folder to find main.py
+            current_file = os.path.abspath(__file__)
+            utils_dir = os.path.dirname(current_file)
+            project_root = os.path.dirname(utils_dir)  # Go up one level from utils/
+
+            # Verify main.py exists there
+            if os.path.exists(os.path.join(project_root, 'main.py')):
+                return project_root
+            else:
+                # Fallback to current working directory
+                return os.getcwd()
+
     except Exception:
-        return os.getcwd()  # Fallback to current working directory
+        return os.getcwd()
 
 def check_and_fix_folders():
     """Check current folder structure and fix issues"""

@@ -250,8 +250,7 @@ class HessianBlobGUI:
         btn_exit.pack(side='bottom', pady=10, padx=10, fill='x')
 
     def setup_output_panel(self, parent):
-        """Setup the output panel for displaying results."""
-
+        """Setup the output panel similar to Igor Pro command line."""
         output_frame = tk.LabelFrame(parent, text="Command History / Output",
                                      font=('Arial', 12, 'bold'),
                                      bg='#f0f0f0')
@@ -280,23 +279,6 @@ class HessianBlobGUI:
                               command=self.clear_output,
                               bg='#7f8c8d', fg='white')
         btn_clear.pack(pady=5)
-
-        # Initial welcome message
-        self.print_to_output("=" * 80)
-        self.print_to_output("Hessian Blob Particle Detection Suite - Python Port")
-        self.print_to_output("=" * 80)
-        self.print_to_output("Based on Igor Pro code by Brendan Marsh")
-        self.print_to_output("G.M. King Laboratory, University of Missouri-Columbia")
-        self.print_to_output("Python Port Email: marshbp@stanford.edu")
-        self.print_to_output("=" * 80)
-        self.print_to_output("")
-        self.print_to_output("INSTRUCTIONS:")
-        self.print_to_output("1. Select an analysis function from the left panel to begin")
-        self.print_to_output("2. Follow the Igor Pro tutorial structure")
-        self.print_to_output("3. Results are saved to folders matching Igor Pro format")
-        self.print_to_output("")
-        self.print_to_output("Current working directory: " + os.getcwd())
-        self.print_to_output("")
 
     def print_to_output(self, text):
         """Print text to the output panel."""
@@ -347,64 +329,25 @@ class HessianBlobGUI:
         self.print_to_output(full_traceback)
 
     def run_batch_hessian_blobs(self):
-        """Run batch Hessian blob analysis."""
-        self.print_to_output("\n" + "=" * 60)
-        self.print_to_output("EXECUTING: BatchHessianBlobs()")
-        self.print_to_output("=" * 60)
-        self.print_to_output("Select folder containing images...")
+        """Run batch Hessian blob analysis - IGOR PRO STYLE"""
 
         def batch_analysis():
             try:
                 result_folder = BatchHessianBlobs()
 
                 if result_folder:
-                    # Use root.after to safely update GUI from worker thread
                     self.root.after(0, lambda: self._show_batch_results(result_folder))
-                else:
-                    self.root.after(0, lambda: self.print_to_output("Analysis cancelled or failed."))
 
             except Exception as e:
-                raise e  # Let the thread handler deal with it
+                raise e
 
         self.run_in_thread(batch_analysis)
 
-    def _show_batch_results(self, result_folder):
-        """Show batch analysis results - called from main thread"""
-        self.print_to_output(f"\n✓ Batch analysis complete!")
-        self.print_to_output(f"Results saved to: {result_folder}")
-        self.print_to_output("Series data folder created with:")
-        self.print_to_output("  - AllHeights.npy")
-        self.print_to_output("  - AllVolumes.npy")
-        self.print_to_output("  - AllAreas.npy")
-        self.print_to_output("  - AllAvgHeights.npy")
-        self.print_to_output("  - Parameters.npy")
-        self.print_to_output("  - Individual image particle folders")
-
-        # Show summary
-        try:
-            heights = np.load(os.path.join(result_folder, "AllHeights.npy"))
-            volumes = np.load(os.path.join(result_folder, "AllVolumes.npy"))
-            areas = np.load(os.path.join(result_folder, "AllAreas.npy"))
-
-            self.print_to_output(f"\nSERIES ANALYSIS SUMMARY:")
-            self.print_to_output(f"  Series complete. Total particles detected: {len(heights)}")
-            if len(heights) > 0:
-                self.print_to_output(f"  Average height: {np.mean(heights):.3e}")
-                self.print_to_output(f"  Average volume: {np.mean(volumes):.3e}")
-                self.print_to_output(f"  Average area: {np.mean(areas):.3e}")
-        except Exception as e:
-            self.print_to_output(f"Could not load summary data: {e}")
-
     def run_single_hessian_blobs(self):
-        """Run single image Hessian blob analysis."""
-        self.print_to_output("\n" + "=" * 60)
-        self.print_to_output("EXECUTING: HessianBlobs(image)")
-        self.print_to_output("=" * 60)
-        self.print_to_output("Select an image file...")
+        """Run single image Hessian blob analysis - IGOR PRO STYLE"""
 
         def single_analysis():
             try:
-                # File dialog
                 image_path = filedialog.askopenfilename(
                     title="Select Image File",
                     filetypes=[
@@ -418,79 +361,49 @@ class HessianBlobGUI:
                 )
 
                 if not image_path:
-                    self.print_to_output("No file selected.")
                     return
 
-                self.print_to_output(f"Loading: {os.path.basename(image_path)}")
                 image = DataManager.load_image_file(image_path)
-
                 if image is None:
-                    self.print_to_output("Failed to load image.")
                     return
 
-                self.print_to_output(f"Image loaded. Shape: {image.shape}")
-
-                # Run analysis
                 result_folder = HessianBlobs(image)
 
-                if result_folder:
-                    self.print_to_output(f"\n✓ Analysis complete!")
-                    self.print_to_output(f"Results saved to: {result_folder}")
-                    self.print_to_output("Image_Particles folder created with:")
-                    self.print_to_output("  - Heights.npy")
-                    self.print_to_output("  - Volumes.npy")
-                    self.print_to_output("  - Areas.npy")
-                    self.print_to_output("  - AvgHeights.npy")
-                    self.print_to_output("  - COM.npy")
-                    self.print_to_output("  - Original.npy")
-                    self.print_to_output("  - Individual Particle_X folders")
-
-                    # Show summary
-                    try:
-                        heights = np.load(os.path.join(result_folder, "Heights.npy"))
-                        volumes = np.load(os.path.join(result_folder, "Volumes.npy"))
-                        areas = np.load(os.path.join(result_folder, "Areas.npy"))
-
-                        self.print_to_output(f"\nSINGLE IMAGE ANALYSIS SUMMARY:")
-                        self.print_to_output(f"  Particles detected: {len(heights)}")
-                        if len(heights) > 0:
-                            self.print_to_output(f"  Average height: {np.mean(heights):.3e}")
-                            self.print_to_output(f"  Average volume: {np.mean(volumes):.3e}")
-                            self.print_to_output(f"  Average area: {np.mean(areas):.3e}")
-                    except Exception as e:
-                        self.print_to_output(f"Could not load summary data: {e}")
-                else:
-                    self.print_to_output("Analysis cancelled or failed.")
-
             except Exception as e:
-                self.print_to_output(f"Error during analysis: {e}")
-                import traceback
-                self.print_to_output(traceback.format_exc())
+                self.print_to_output(f"Error: {e}")
 
         self.run_in_thread(single_analysis)
 
     def run_batch_preprocess(self):
-        """Run batch preprocessing - IGOR PRO STYLE."""
-        self.print_to_output("\n" + "=" * 60)
-        self.print_to_output("EXECUTING: BatchPreprocess()")
-        self.print_to_output("=" * 60)
-        self.print_to_output("Select folder containing images to preprocess...")
-        self.print_to_output("Note: Preprocessed images will be saved to a new folder")
+        """Run batch preprocessing - IGOR PRO STYLE"""
 
         def preprocess():
             try:
                 result = BatchPreprocess()
-                if result == 0:
-                    self.print_to_output("✓ Preprocessing completed successfully.")
-                    self.print_to_output("✓ Preprocessed images saved to new folder.")
-                else:
-                    self.print_to_output("Preprocessing failed or was cancelled.")
             except Exception as e:
-                self.print_to_output(f"Error during preprocessing: {e}")
-                import traceback
-                self.print_to_output(traceback.format_exc())
+                self.print_to_output(f"Error: {e}")
 
         self.run_in_thread(preprocess)
+
+    def run_testing_function(self):
+        """Run testing function - IGOR PRO STYLE"""
+
+        def test_function():
+            try:
+                test_string = simpledialog.askstring("Testing Function", "Enter a test string:")
+                if test_string is None:
+                    return
+
+                test_number = simpledialog.askfloat("Testing Function", "Enter a test number:")
+                if test_number is None:
+                    return
+
+                Testing(test_string, test_number)
+
+            except Exception as e:
+                self.print_to_output(f"Error: {e}")
+
+        self.run_in_thread(test_function)
 
     def run_view_particles(self):
         """Run particle viewer - FIXED THREADING VERSION."""
