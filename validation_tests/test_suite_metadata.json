@@ -1,0 +1,238 @@
+{
+  "test_suite_version": "1.0",
+  "total_test_cases": 8,
+  "generated_timestamp": "2025-07-12T22:56:05.804732",
+  "test_cases": [
+    {
+      "image_id": "test_01_single_blob",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 128,
+          "y": 128,
+          "sigma": 5.0,
+          "amplitude": 100.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.648345",
+      "expected_blob_count": 1
+    },
+    {
+      "image_id": "test_02_multiple_blobs",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 64,
+          "y": 64,
+          "sigma": 4.0,
+          "amplitude": 80.0
+        },
+        {
+          "x": 192,
+          "y": 64,
+          "sigma": 6.0,
+          "amplitude": 120.0
+        },
+        {
+          "x": 128,
+          "y": 192,
+          "sigma": 3.0,
+          "amplitude": 60.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.736217",
+      "expected_blob_count": 3
+    },
+    {
+      "image_id": "test_03_boundary_blobs",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 5,
+          "y": 5,
+          "sigma": 3.0,
+          "amplitude": 90.0
+        },
+        {
+          "x": 250,
+          "y": 5,
+          "sigma": 4.0,
+          "amplitude": 85.0
+        },
+        {
+          "x": 5,
+          "y": 250,
+          "sigma": 3.5,
+          "amplitude": 75.0
+        },
+        {
+          "x": 250,
+          "y": 250,
+          "sigma": 4.5,
+          "amplitude": 95.0
+        },
+        {
+          "x": 128,
+          "y": 2,
+          "sigma": 3.0,
+          "amplitude": 70.0
+        },
+        {
+          "x": 2,
+          "y": 128,
+          "sigma": 3.0,
+          "amplitude": 80.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.749215",
+      "expected_blob_count": 6
+    },
+    {
+      "image_id": "test_04_different_scales",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 64,
+          "y": 64,
+          "sigma": 2.0,
+          "amplitude": 100.0
+        },
+        {
+          "x": 128,
+          "y": 64,
+          "sigma": 5.0,
+          "amplitude": 100.0
+        },
+        {
+          "x": 192,
+          "y": 64,
+          "sigma": 8.0,
+          "amplitude": 100.0
+        },
+        {
+          "x": 64,
+          "y": 128,
+          "sigma": 1.5,
+          "amplitude": 100.0
+        },
+        {
+          "x": 192,
+          "y": 128,
+          "sigma": 10.0,
+          "amplitude": 100.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.764237",
+      "expected_blob_count": 5
+    },
+    {
+      "image_id": "test_05_overlapping_blobs",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 100,
+          "y": 100,
+          "sigma": 8.0,
+          "amplitude": 80.0
+        },
+        {
+          "x": 110,
+          "y": 105,
+          "sigma": 6.0,
+          "amplitude": 70.0
+        },
+        {
+          "x": 150,
+          "y": 150,
+          "sigma": 5.0,
+          "amplitude": 90.0
+        },
+        {
+          "x": 155,
+          "y": 155,
+          "sigma": 4.0,
+          "amplitude": 60.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.776246",
+      "expected_blob_count": 4
+    },
+    {
+      "image_id": "test_06_with_noise",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 80,
+          "y": 80,
+          "sigma": 4.0,
+          "amplitude": 120.0
+        },
+        {
+          "x": 180,
+          "y": 180,
+          "sigma": 6.0,
+          "amplitude": 100.0
+        }
+      ],
+      "noise_level": 5.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.785610",
+      "expected_blob_count": 2
+    },
+    {
+      "image_id": "test_07_different_amplitudes",
+      "width": 256,
+      "height": 256,
+      "blobs": [
+        {
+          "x": 64,
+          "y": 128,
+          "sigma": 4.0,
+          "amplitude": 30.0
+        },
+        {
+          "x": 128,
+          "y": 128,
+          "sigma": 4.0,
+          "amplitude": 80.0
+        },
+        {
+          "x": 192,
+          "y": 128,
+          "sigma": 4.0,
+          "amplitude": 150.0
+        }
+      ],
+      "noise_level": 0.0,
+      "background_level": 0.0,
+      "created_timestamp": "2025-07-12T22:56:05.794734",
+      "expected_blob_count": 3
+    },
+    {
+      "image_id": "test_08_empty_image",
+      "width": 256,
+      "height": 256,
+      "blobs": [],
+      "noise_level": 2.0,
+      "background_level": 5.0,
+      "created_timestamp": "2025-07-12T22:56:05.800737",
+      "expected_blob_count": 0
+    }
+  ]
+}

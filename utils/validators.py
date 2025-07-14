@@ -29,6 +29,9 @@ def validate_hessian_parameters(params):
         raise HessianBlobError("Maximum size must be positive")
     if scale_factor <= 1.0:
         raise HessianBlobError("Scaling factor must be greater than 1.0")
+    # Updated threshold validation to handle -2, -1, and positive values
+    if det_h_thresh != -1 and det_h_thresh != -2 and det_h_thresh <= 0:
+        raise HessianBlobError("Manual threshold must be positive (use -1 for Otsu, -2 for Interactive)")
     if particle_type not in [-1, 0, 1]:
         raise HessianBlobError("Particle type must be -1, 0, or 1")
     if subpixel_mult < 1:

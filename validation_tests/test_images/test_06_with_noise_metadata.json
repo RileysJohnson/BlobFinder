@@ -1,0 +1,23 @@
+{
+  "image_id": "test_06_with_noise",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 80,
+      "y": 80,
+      "sigma": 4.0,
+      "amplitude": 120.0
+    },
+    {
+      "x": 180,
+      "y": 180,
+      "sigma": 6.0,
+      "amplitude": 100.0
+    }
+  ],
+  "noise_level": 5.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.785610",
+  "expected_blob_count": 2
+}

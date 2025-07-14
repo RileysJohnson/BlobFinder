@@ -17,7 +17,7 @@
 import numpy as np
 from scipy import ndimage
 from scipy.fft import fft2, ifft2, fftfreq
-from utils.error_handler import handle_error, HessianBlobError
+from utils.error_handler import handle_error, HessianBlobError, safe_print
 
 def ScaleSpaceRepresentation(im, layers, t0, tFactor):
     """Computes the discrete scale-space representation L of an image."""
@@ -128,28 +128,41 @@ def OtsuThreshold(detH, LG, particleType, maxCurvatureRatio):
         # First identify the maxes
         Maxes = GetMaxes(detH, LG, particleType, maxCurvatureRatio)
         if len(Maxes) == 0:
+            safe_print("No maxima found for Otsu threshold calculation.")
             return 0.0
 
-        # Create a histogram of the maxes
-        Hist, bin_edges = np.histogram(Maxes, bins=50)
+        # Create a histogram of the maxes using Igor Pro's approach
+        # Igor Pro uses 5 bins by default: Histogram/B=5
+        num_bins = max(5, min(50, len(Maxes) // 10))
+        Hist, bin_edges = np.histogram(Maxes, bins=num_bins)
 
-        # Search for the best threshold
+        # Search for the best threshold using Igor Pro's intra-class variance method
         minICV = np.inf
-        bestThresh = -np.inf
+        bestThresh = 0.0
 
-        for i in range(len(Hist)):
+        for i in range(len(bin_edges) - 1):
             xThresh = bin_edges[i]
-            below_thresh = Maxes[Maxes < xThresh]
-            above_thresh = Maxes[Maxes >= xThresh]
+
+            # Split data at threshold
+            below_mask = Maxes < xThresh
+            above_mask = Maxes >= xThresh
+
+            below_thresh = Maxes[below_mask]
+            above_thresh = Maxes[above_mask]
 
             if len(below_thresh) == 0 or len(above_thresh) == 0:
                 continue
 
-            w1 = len(below_thresh) / len(Maxes)
-            w2 = len(above_thresh) / len(Maxes)
+            # Calculate intra-class variance exactly like Igor Pro
+            # ICV = Sum(Hist,-inf,xThresh)*Variance(Workhorse) + Sum(Hist,xThresh,inf)*Variance(Workhorse)
+            w1 = len(below_thresh)
+            w2 = len(above_thresh)
 
-            if w1 > 0 and w2 > 0:
-                ICV = w1 * np.var(below_thresh) + w2 * np.var(above_thresh)
+            if w1 > 1 and w2 > 1:
+                var1 = np.var(below_thresh, ddof=0)  # Population variance like Igor Pro
+                var2 = np.var(above_thresh, ddof=0)
+                ICV = w1 * var1 + w2 * var2
+
                 if ICV < minICV:
                     bestThresh = xThresh
                     minICV = ICV
@@ -290,48 +303,35 @@ def GetMaxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=
 def FindHessianBlobs(im, detH, LG, minResponse, particleType, maxCurvatureRatio):
     """Find Hessian blobs by detecting scale-space extrema."""
     try:
-        # Square the minResponse, since the parameter is provided as the square root
-        # of the actual minimum detH response so that it is in normal image units
-        minResponse = minResponse ** 2
-
-        # mapNum: Map identifying particle numbers
-        mapNum = np.full(detH.shape, -1, dtype=int)
-
-        # mapLG: Map identifying the value of the LoG at the defined scale
-        mapLG = np.zeros_like(detH)
-
-        # mapMax: Map identifying the value of the LoG of the maximum pixel
-        mapMax = np.zeros_like(detH)
-
-        # Maintain an info list with particle boundaries and info
-        Info = []
-
         limI, limJ, limK = detH.shape
+        mapNum = np.full((limI, limJ, limK), -1, dtype=np.int32)
+        mapLG = np.zeros_like(detH)
+        mapMax = np.zeros_like(detH)
+        Info = []
         cnt = 0
 
-        # Start with smallest blobs then go to larger blobs
+        # Scan through scale-space from smallest to largest scales
         for k in range(1, limK - 1):
             for i in range(1, limI - 1):
                 for j in range(1, limJ - 1):
 
-                    # Does it hit the threshold?
-                    if detH[i, j, k] < minResponse:
+                    # Check if blob strength meets minimum threshold
+                    if detH[i, j, k] < minResponse ** 2:  # Square threshold to match Igor Pro
                         continue
 
-                    # Is it too edgy?
+                    # Is it too edgy? (curvature ratio test)
                     if detH[i, j, k] > 0 and LG[i, j, k] ** 2 / detH[i, j, k] >= (
                             maxCurvatureRatio + 1) ** 2 / maxCurvatureRatio:
                         continue
 
-                    # Is there a particle there already?
-                    if mapNum[i, j, k] > -1 and detH[i, j, k] <= Info[mapNum[i, j, k]][3]:
-                        continue
-
                     # Is it the right type of particle?
-                    if ((particleType == -1 and LG[i, j, k] < 0) or (particleType == 1 and LG[i, j, k] > 0)):
+                    if particleType == -1 and LG[i, j, k] >= 0:
+                        continue
+                    if particleType == 1 and LG[i, j, k] <= 0:
                         continue
 
-                    # There are 26 neighbors in three dimensions.. Have to check if it is a local maximum
+                    # Check if it's a local maximum in 3D neighborhood
+                    # Must be strictly greater than some neighbors and >= all others
                     strictlyGreater = max(detH[i - 1, j - 1, k - 1],
                                           max(detH[i - 1, j - 1, k],
                                               max(detH[i - 1, j, k - 1], detH[i, j - 1, k - 1])))
@@ -342,6 +342,7 @@ def FindHessianBlobs(im, detH, LG, minResponse, particleType, maxCurvatureRatio)
                     if not (detH[i, j, k] > strictlyGreater):
                         continue
 
+                    # Check remaining neighbors for >= condition
                     greaterOrEqual = detH[i - 1, j - 1, k + 1]
                     greaterOrEqual = max(greaterOrEqual, detH[i - 1, j, k + 1])
                     greaterOrEqual = max(greaterOrEqual,
@@ -367,7 +368,7 @@ def FindHessianBlobs(im, detH, LG, minResponse, particleType, maxCurvatureRatio)
                     if not (detH[i, j, k] >= greaterOrEqual):
                         continue
 
-                    # It's a local max, is it overlapped and bigger than another one already?
+                    # Check if there's already a particle at this location
                     if mapNum[i, j, k] > -1:
                         if detH[i, j, k] > Info[mapNum[i, j, k]][3]:
                             # Replace the weaker particle

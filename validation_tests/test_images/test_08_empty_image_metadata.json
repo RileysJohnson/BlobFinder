@@ -1,0 +1,10 @@
+{
+  "image_id": "test_08_empty_image",
+  "width": 256,
+  "height": 256,
+  "blobs": [],
+  "noise_level": 2.0,
+  "background_level": 5.0,
+  "created_timestamp": "2025-07-12T22:56:05.800737",
+  "expected_blob_count": 0
+}

@@ -1,0 +1,35 @@
+{
+  "image_id": "test_05_overlapping_blobs",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 100,
+      "y": 100,
+      "sigma": 8.0,
+      "amplitude": 80.0
+    },
+    {
+      "x": 110,
+      "y": 105,
+      "sigma": 6.0,
+      "amplitude": 70.0
+    },
+    {
+      "x": 150,
+      "y": 150,
+      "sigma": 5.0,
+      "amplitude": 90.0
+    },
+    {
+      "x": 155,
+      "y": 155,
+      "sigma": 4.0,
+      "amplitude": 60.0
+    }
+  ],
+  "noise_level": 0.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.776246",
+  "expected_blob_count": 4
+}

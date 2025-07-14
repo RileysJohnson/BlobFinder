@@ -1,0 +1,41 @@
+{
+  "image_id": "test_04_different_scales",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 64,
+      "y": 64,
+      "sigma": 2.0,
+      "amplitude": 100.0
+    },
+    {
+      "x": 128,
+      "y": 64,
+      "sigma": 5.0,
+      "amplitude": 100.0
+    },
+    {
+      "x": 192,
+      "y": 64,
+      "sigma": 8.0,
+      "amplitude": 100.0
+    },
+    {
+      "x": 64,
+      "y": 128,
+      "sigma": 1.5,
+      "amplitude": 100.0
+    },
+    {
+      "x": 192,
+      "y": 128,
+      "sigma": 10.0,
+      "amplitude": 100.0
+    }
+  ],
+  "noise_level": 0.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.764237",
+  "expected_blob_count": 5
+}

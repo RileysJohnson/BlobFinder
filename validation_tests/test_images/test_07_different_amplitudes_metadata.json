@@ -1,0 +1,29 @@
+{
+  "image_id": "test_07_different_amplitudes",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 64,
+      "y": 128,
+      "sigma": 4.0,
+      "amplitude": 30.0
+    },
+    {
+      "x": 128,
+      "y": 128,
+      "sigma": 4.0,
+      "amplitude": 80.0
+    },
+    {
+      "x": 192,
+      "y": 128,
+      "sigma": 4.0,
+      "amplitude": 150.0
+    }
+  ],
+  "noise_level": 0.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.794734",
+  "expected_blob_count": 3
+}

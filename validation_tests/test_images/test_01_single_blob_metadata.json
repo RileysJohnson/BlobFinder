@@ -1,0 +1,17 @@
+{
+  "image_id": "test_01_single_blob",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 128,
+      "y": 128,
+      "sigma": 5.0,
+      "amplitude": 100.0
+    }
+  ],
+  "noise_level": 0.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.648345",
+  "expected_blob_count": 1
+}

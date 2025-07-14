@@ -1,26 +1,13 @@
-"""Contains all GUI dialogs for gathering user input."""
-
-# #######################################################################
-#                        GUI: PARAMETER DIALOGS
-#
-#   CONTENTS:
-#       - class ParameterDialog: Provides dialogs for setting Hessian
-#         parameters and measurement constraints.
-#       - def InteractiveThreshold: Creates an interactive plot for the user
-#         to visually select the blob strength threshold.
-#
-# #######################################################################
-
 import numpy as np
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 from utils.validators import validate_hessian_parameters, validate_constraints
-from core.blob_detection import GetMaxes
 from utils.error_handler import handle_error, safe_print
 import matplotlib
+
 
 class ParameterDialog:
     """Parameter dialog with validation"""
@@ -30,14 +17,14 @@ class ParameterDialog:
         """Get Hessian blob parameters"""
         root = tk.Tk()
         root.title("Hessian Blob Parameters")
-        root.geometry("600x500")
+        root.geometry("700x550")
         root.configure(bg='#f0f0f0')
 
         # Center window
         root.update_idletasks()
-        x = (root.winfo_screenwidth() // 2) - (600 // 2)
-        y = (root.winfo_screenheight() // 2) - (500 // 2)
-        root.geometry(f"600x500+{x}+{y}")
+        x = (root.winfo_screenwidth() // 2) - (700 // 2)
+        y = (root.winfo_screenheight() // 2) - (550 // 2)
+        root.geometry(f"700x550+{x}+{y}")
 
         # Title
         title_label = tk.Label(root, text="Hessian Blob Parameters",
@@ -53,7 +40,6 @@ class ParameterDialog:
             'scaleStart': 1,
             'layers': 256,
             'scaleFactor': 1.5,
-            'detHResponseThresh': -2,
             'particleType': 1,
             'subPixelMult': 1,
             'allowOverlap': 0
@@ -70,7 +56,6 @@ class ParameterDialog:
             "Minimum Size in Pixels",
             "Maximum Size in Pixels",
             "Scaling Factor",
-            "Minimum Blob Strength (-2 for Interactive, -1 for Otsu's Method)",
             "Particle Type (-1 for negative, +1 for positive, 0 for both)",
             "Subpixel Ratio",
             "Allow Hessian Blobs to Overlap? (1=yes 0=no)"
@@ -90,17 +75,61 @@ class ParameterDialog:
             entry.pack(side='right', padx=(10, 0))
             entries[key] = entry
 
+        # Special handling for blob strength threshold
+        threshold_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        threshold_frame.pack(fill='x', pady=5)
+
+        threshold_label = tk.Label(threshold_frame, text="Minimum Blob Strength", width=50, anchor='w',
+                                   font=('Arial', 10), bg='#f0f0f0')
+        threshold_label.pack(side='left')
+
+        # Right side container for dropdown and entry
+        right_container = tk.Frame(threshold_frame, bg='#f0f0f0')
+        right_container.pack(side='right', padx=(10, 0))
+
+        # Dropdown for threshold method
+        threshold_method = tk.StringVar(value="Interactive")
+        threshold_dropdown = ttk.Combobox(right_container, textvariable=threshold_method,
+                                          values=["Interactive", "Otsu's Method", "Manual"],
+                                          state="readonly", width=12)
+        threshold_dropdown.pack(side='left', padx=(0, 5))
+
+        # Entry for manual threshold value
+        manual_threshold = tk.DoubleVar(value=0.001)
+        threshold_entry = tk.Entry(right_container, textvariable=manual_threshold, width=15,
+                                   font=('Arial', 10), state='disabled')
+        threshold_entry.pack(side='left')
+
+        def on_threshold_method_change(*args):
+            if threshold_method.get() == "Manual":
+                threshold_entry.config(state='normal')
+            else:
+                threshold_entry.config(state='disabled')
+
+        threshold_method.trace('w', on_threshold_method_change)
+
         result = [None]
         error_label = tk.Label(main_frame, text="", fg='red', bg='#f0f0f0')
         error_label.pack(pady=5)
 
         def validate_and_continue():
             try:
+                # Determine threshold value based on method
+                method = threshold_method.get()
+                if method == "Interactive":
+                    detHResponseThresh = -2
+                elif method == "Otsu's Method":
+                    detHResponseThresh = -1
+                else:  # Manual
+                    detHResponseThresh = manual_threshold.get()
+                    if detHResponseThresh <= 0:
+                        raise ValueError("Manual threshold must be positive")
+
                 params = [
                     vars_dict['scaleStart'].get(),
                     vars_dict['layers'].get(),
                     vars_dict['scaleFactor'].get(),
-                    vars_dict['detHResponseThresh'].get(),
+                    detHResponseThresh,
                     vars_dict['particleType'].get(),
                     vars_dict['subPixelMult'].get(),
                     vars_dict['allowOverlap'].get()
@@ -123,7 +152,10 @@ Hessian Blob Parameters Help:
 1. Minimum Size: Minimum radius of particles to detect (pixels)
 2. Maximum Size: Maximum radius of particles to detect (pixels)  
 3. Scaling Factor: Scale-space precision (1.2-2.0, default 1.5)
-4. Blob Strength: Threshold (-2=interactive, -1=Otsu, >0=manual)
+4. Blob Strength: 
+   - Interactive: Select threshold visually
+   - Otsu's Method: Automatic threshold calculation
+   - Manual: Enter specific threshold value
 5. Particle Type: +1=positive blobs, -1=negative, 0=both
 6. Subpixel Ratio: Subpixel precision multiplier (1=pixel accuracy)
 7. Allow Overlap: 1=allow overlapping particles, 0=no overlap
@@ -186,24 +218,24 @@ Hessian Blob Parameters Help:
         }
 
         labels = [
-            "Minimum height",
-            "Maximum height",
-            "Minimum area",
-            "Maximum area",
-            "Minimum volume",
-            "Maximum volume"
+            "Minimum Height",
+            "Maximum Height",
+            "Minimum Area",
+            "Maximum Area",
+            "Minimum Volume",
+            "Maximum Volume"
         ]
 
         # Create constraint input fields
         for i, (key, var) in enumerate(vars_dict.items()):
             frame = tk.Frame(main_frame, bg='#f0f0f0')
-            frame.pack(fill='x', pady=8)
+            frame.pack(fill='x', pady=5)
 
             label = tk.Label(frame, text=labels[i], width=20, anchor='w',
-                             font=('Arial', 11), bg='#f0f0f0')
+                             font=('Arial', 10), bg='#f0f0f0')
             label.pack(side='left')
 
-            entry = tk.Entry(frame, textvariable=var, width=15, font=('Arial', 11))
+            entry = tk.Entry(frame, textvariable=var, width=20, font=('Arial', 10))
             entry.pack(side='right', padx=(10, 0))
 
         result = [None]
@@ -211,7 +243,6 @@ Hessian Blob Parameters Help:
         error_label.pack(pady=5)
 
         def parse_value(val_str):
-            """Parse constraint values, handling inf/-inf."""
             val_str = val_str.strip()
             if val_str.lower() in ['-inf', '-infinity']:
                 return -np.inf
@@ -276,9 +307,12 @@ Example: minHeight=0, maxHeight=5e-9
         root.mainloop()
         return result[0]
 
+
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     """Lets the user interactively choose a blob strength for the determinant of Hessian."""
     try:
+        from core.blob_detection import GetMaxes
+
         # First identify the maxes
         SS_MAXMAP = np.full_like(im, -1.0)
         SS_MAXSCALEMAP = np.zeros_like(im)
@@ -391,6 +425,7 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
         instructions_text = ('Use the slider to adjust blob strength threshold.\n'
                              'Red circles show detected particles.\n'
                              'Click "Accept" when satisfied with detection.')
+
         ax_text.text(0.1, 0.3, instructions_text, fontsize=9,
                      transform=ax_text.transAxes, style='italic')
 
@@ -407,4 +442,3 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     except Exception as e:
         handle_error("InteractiveThreshold", e)
         return 0.0
-

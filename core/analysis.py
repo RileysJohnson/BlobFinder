@@ -171,11 +171,61 @@ def BatchHessianBlobs():
         messagebox.showerror("Analysis Error", error_msg)
         return ""
 
-def HessianBlobs(im, scaleStart=1, layers=15, scaleFactor=1.5, detHResponseThresh=-1,
-                 particleType=0, subPixelMult=1, allowOverlap=0, minH=-np.inf, maxH=np.inf,
-                 minA=-np.inf, maxA=np.inf, minV=-np.inf, maxV=np.inf):
-    """Main function for Hessian blob particle detection analysis."""
+def HessianBlobs(im, params=None):
+    """Executes the Hessian blob algorithm on an image."""
     try:
+        # Declare algorithm parameters with Igor Pro defaults
+        scaleStart = 1
+        layers = max(im.shape[0], im.shape[1]) // 4
+        scaleFactor = 1.5
+        detHResponseThresh = -2
+        particleType = 1
+        subPixelMult = 1
+        allowOverlap = 0
+
+        # Declare measurement ranges
+        minH = -np.inf
+        maxH = np.inf
+        minV = -np.inf
+        maxV = np.inf
+        minA = -np.inf
+        maxA = np.inf
+
+        # Retrieve parameters if given in the params array, or prompt the user for them if not
+        if params is not None:
+            if len(params) < 13:
+                raise HessianBlobError("Error: Provided parameter array must contain 13 parameters.")
+
+            scaleStart = params[0]
+            layers = params[1]
+            scaleFactor = params[2]
+            detHResponseThresh = params[3]
+            particleType = params[4]
+            subPixelMult = params[5]
+            allowOverlap = params[6]
+            minH = params[7]
+            maxH = params[8]
+            minA = params[9]
+            maxA = params[10]
+            minV = params[11]
+            maxV = params[12]
+        else:
+            # Get parameters from user dialog
+            param_values = ParameterDialog.get_hessian_parameters()
+            if param_values is None:
+                return ""
+
+            scaleStart, layers, scaleFactor, detHResponseThresh, particleType, subPixelMult, allowOverlap = param_values
+
+            # Get constraints if needed
+            constraints_answer = messagebox.askyesno("Constraints",
+                                                     "Would you like to limit the analysis to particles of certain height, volume, or area?")
+            if constraints_answer:
+                constraints = ParameterDialog.get_constraints_dialog()
+                if constraints is None:
+                    return ""
+                minH, maxH, minA, maxA, minV, maxV = constraints
+
         # Convert scaleStart from pixel units to scaled units squared
         scaleStart = (scaleStart * 1.0) ** 2 / 2
         layers = max(1, int(np.ceil(np.log((layers * 1.0) ** 2 / (2 * scaleStart)) / np.log(scaleFactor))))
@@ -184,7 +234,7 @@ def HessianBlobs(im, scaleStart=1, layers=15, scaleFactor=1.5, detHResponseThres
 
         # Hard coded parameters matching Igor Pro exactly
         gammaNorm = 1
-        maxCurvatureRatio = 10  # Must match Igor Pro hardcoded value
+        maxCurvatureRatio = 10
         allowBoundaryParticles = 1
 
         # Create output folder
@@ -206,14 +256,17 @@ def HessianBlobs(im, scaleStart=1, layers=15, scaleFactor=1.5, detHResponseThres
         DataManager.save_wave_data(LapG, os.path.join(NewDF, "LapG.npy"))
         DataManager.save_wave_data(detH, os.path.join(NewDF, "detH.npy"))
 
-        # Threshold determination
+        # Threshold determination - exactly matching Igor Pro logic
         if detHResponseThresh == -1:
             safe_print("Calculating Otsu's Threshold..")
             detHResponseThresh = np.sqrt(OtsuThreshold(detH, LapG, particleType, maxCurvatureRatio))
             safe_print(f"Otsu's Threshold: {detHResponseThresh}")
         elif detHResponseThresh == -2:
+            from gui.dialogs import InteractiveThreshold
             detHResponseThresh = InteractiveThreshold(im, detH, LapG, particleType, maxCurvatureRatio)
             safe_print(f"Chosen Det H Response Threshold: {detHResponseThresh}")
+        else:
+            safe_print(f"Using manual threshold: {detHResponseThresh}")
 
         # Detect particles
         safe_print("Detecting Hessian blobs..")
@@ -262,9 +315,84 @@ def HessianBlobs(im, scaleStart=1, layers=15, scaleFactor=1.5, detHResponseThres
             if Info[i][2] < 1 or (Info[i][5] - Info[i][4]) < 0 or (Info[i][7] - Info[i][6]) < 0:
                 continue
 
-            # Continue with existing particle processing logic...
-            # [Rest of the function remains unchanged]
+            # Boundary particles check
+            if allowBoundaryParticles == 0:
+                if (Info[i][4] < 1 or Info[i][5] >= im.shape[0] - 1 or
+                    Info[i][6] < 1 or Info[i][7] >= im.shape[1] - 1):
+                    continue
 
+            # Apply measurement constraints
+            pSeed = int(Info[i][0])
+            qSeed = int(Info[i][1])
+            kSeed = int(Info[i][2])
+
+            # Calculate rough dimensions for cropping
+            padding = max(5, int(np.sqrt(2 * kSeed)))
+            pMin = max(0, pSeed - padding)
+            pMax = min(im.shape[0], pSeed + padding + 1)
+            qMin = max(0, qSeed - padding)
+            qMax = min(im.shape[1], qSeed + padding + 1)
+
+            # Crop image region
+            crop = im[pMin:pMax, qMin:qMax].copy()
+
+            if crop.size == 0:
+                continue
+
+            # Store bounding box
+            Info[i][4] = pMin
+            Info[i][5] = pMax - 1
+            Info[i][6] = qMin
+            Info[i][7] = qMax - 1
+
+            # Measure height
+            height = M_Height(crop)
+            if not (minH <= height <= maxH):
+                continue
+
+            # Measure volume
+            volume = M_Volume(crop)
+            if not (minV <= volume <= maxV):
+                continue
+
+            # Measure area
+            area = M_Area(crop)
+            if not (minA <= area <= maxA):
+                continue
+
+            # Measure center of mass
+            com = M_CenterOfMass(crop)
+
+            # Calculate average height
+            avgHeight = volume / area if area > 0 else 0
+
+            # Store measurements
+            Heights.append(height)
+            Volumes.append(volume)
+            Areas.append(area)
+            AvgHeights.append(avgHeight)
+            COM.append(com)
+
+            # Update Info with measurements
+            Info[i][8] = height
+            Info[i][9] = volume
+            Info[i][11] = area
+            Info[i][12] = avgHeight
+
+        # Convert to numpy arrays and save
+        Heights = np.array(Heights)
+        Volumes = np.array(Volumes)
+        Areas = np.array(Areas)
+        AvgHeights = np.array(AvgHeights)
+        COM = np.array(COM) if COM else np.array([]).reshape(0, 2)
+
+        DataManager.save_wave_data(Heights, os.path.join(NewDF, "Heights.npy"))
+        DataManager.save_wave_data(Volumes, os.path.join(NewDF, "Volumes.npy"))
+        DataManager.save_wave_data(Areas, os.path.join(NewDF, "Areas.npy"))
+        DataManager.save_wave_data(AvgHeights, os.path.join(NewDF, "AvgHeights.npy"))
+        DataManager.save_wave_data(COM, os.path.join(NewDF, "COM.npy"))
+
+        safe_print(f"Analysis complete. {len(Heights)} particles found.")
         return NewDF
 
     except Exception as e:
@@ -356,8 +484,11 @@ def HessianBlobs_SeriesMode(im, params=None, seriesFolder=None, imageIndex=0):
         detHResponseThresh = np.sqrt(OtsuThreshold(detH, LapG, particleType, maxCurvatureRatio))
         safe_print(f"Otsu's Threshold: {detHResponseThresh}")
     elif detHResponseThresh == -2:
+        from gui.dialogs import InteractiveThreshold
         detHResponseThresh = InteractiveThreshold(im, detH, LapG, particleType, maxCurvatureRatio)
         safe_print(f"Chosen Det H Response Threshold: {detHResponseThresh}")
+    else:
+        safe_print(f"Using manual threshold: {detHResponseThresh}")
 
     # Detect particles
     safe_print("Detecting Hessian blobs..")

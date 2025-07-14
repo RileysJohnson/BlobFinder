@@ -1,0 +1,47 @@
+{
+  "image_id": "test_03_boundary_blobs",
+  "width": 256,
+  "height": 256,
+  "blobs": [
+    {
+      "x": 5,
+      "y": 5,
+      "sigma": 3.0,
+      "amplitude": 90.0
+    },
+    {
+      "x": 250,
+      "y": 5,
+      "sigma": 4.0,
+      "amplitude": 85.0
+    },
+    {
+      "x": 5,
+      "y": 250,
+      "sigma": 3.5,
+      "amplitude": 75.0
+    },
+    {
+      "x": 250,
+      "y": 250,
+      "sigma": 4.5,
+      "amplitude": 95.0
+    },
+    {
+      "x": 128,
+      "y": 2,
+      "sigma": 3.0,
+      "amplitude": 70.0
+    },
+    {
+      "x": 2,
+      "y": 128,
+      "sigma": 3.0,
+      "amplitude": 80.0
+    }
+  ],
+  "noise_level": 0.0,
+  "background_level": 0.0,
+  "created_timestamp": "2025-07-12T22:56:05.749215",
+  "expected_blob_count": 6
+}
