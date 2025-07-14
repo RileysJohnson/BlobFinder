@@ -90,8 +90,15 @@ def BlobDetectors(L, gammaNorm):
         LapG = Lxx + Lyy
 
         # Gamma normalize and account for pixel spacing
+        # Use proper scale-space parameters instead of hardcoded values
+        t0 = 1.0  # This should match the t0 used in ScaleSpaceRepresentation
+        tFactor = 1.5  # This should match the tFactor used in ScaleSpaceRepresentation
+        dimDelta_x = 1.0  # Pixel spacing in x
+        dimDelta_y = 1.0  # Pixel spacing in y
+
         for r in range(L.shape[2]):
-            scale_factor = (1.0 * (1.5 ** r)) ** gammaNorm / (1.0 * 1.0)
+            # Igor: (DimOffset(L,2)*DimDelta(L,2)^r)^(gammaNorm) / (DimDelta(L,0)*DimDelta(L,1))
+            scale_factor = (t0 * (tFactor ** r)) ** gammaNorm / (dimDelta_x * dimDelta_y)
             LapG[:, :, r] *= scale_factor
 
         # Fix errors on the boundary of the image
@@ -102,7 +109,8 @@ def BlobDetectors(L, gammaNorm):
 
         # Gamma normalize and account for pixel spacing
         for r in range(L.shape[2]):
-            scale_factor = (1.0 * (1.5 ** r)) ** (2 * gammaNorm) / (1.0 * 1.0) ** 2
+            # Igor: (DimOffset(L,2)*DimDelta(L,2)^r)^(2*gammaNorm) / (DimDelta(L,0)*DimDelta(L,1))^2
+            scale_factor = (t0 * (tFactor ** r)) ** (2 * gammaNorm) / (dimDelta_x * dimDelta_y) ** 2
             detH[:, :, r] *= scale_factor
 
         # Fix the boundary issues again
@@ -227,24 +235,40 @@ def GetMaxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=
                     if ((particleType == -1 and LG[i, j, k] < 0) or (particleType == 1 and LG[i, j, k] > 0)):
                         continue
 
-                    # Check if it is a local maximum
-                    is_max = True
-                    for di in [-1, 0, 1]:
-                        for dj in [-1, 0, 1]:
-                            for dk in [-1, 0, 1]:
-                                if di == 0 and dj == 0 and dk == 0:
-                                    continue
-                                ni, nj, nk = i + di, j + dj, k + dk
-                                if (0 <= ni < limI and 0 <= nj < limJ and 0 <= nk < limK):
-                                    if detH[ni, nj, nk] > detH[i, j, k]:
-                                        is_max = False
-                                        break
-                            if not is_max:
-                                break
-                        if not is_max:
-                            break
+                    # There are 26 neighbors in three dimensions.. Have to check if it is a local maximum
+                    strictlyGreater = max(detH[i - 1, j - 1, k - 1],
+                                          max(detH[i - 1, j - 1, k],
+                                              max(detH[i - 1, j, k - 1], detH[i, j - 1, k - 1])))
+                    strictlyGreater = max(strictlyGreater,
+                                          max(detH[i, j, k - 1],
+                                              max(detH[i, j - 1, k], detH[i - 1, j, k])))
 
-                    if not is_max:
+                    if not (detH[i, j, k] > strictlyGreater):
+                        continue
+
+                    greaterOrEqual = detH[i - 1, j - 1, k + 1]
+                    greaterOrEqual = max(greaterOrEqual, detH[i - 1, j, k + 1])
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i - 1, j + 1, k - 1],
+                                             max(detH[i - 1, j + 1, k], detH[i - 1, j + 1, k + 1])))
+
+                    greaterOrEqual = max(greaterOrEqual, detH[i, j - 1, k + 1])
+                    greaterOrEqual = max(greaterOrEqual, detH[i, j, k + 1])
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i, j + 1, k - 1],
+                                             max(detH[i, j + 1, k], detH[i, j + 1, k + 1])))
+
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j - 1, k - 1],
+                                             max(detH[i + 1, j - 1, k], detH[i + 1, j - 1, k + 1])))
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j, k - 1],
+                                             max(detH[i + 1, j, k], detH[i + 1, j, k + 1])))
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j + 1, k - 1],
+                                             max(detH[i + 1, j + 1, k], detH[i + 1, j + 1, k + 1])))
+
+                    if not (detH[i, j, k] >= greaterOrEqual):
                         continue
 
                     Maxes.append(detH[i, j, k])
@@ -253,7 +277,9 @@ def GetMaxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=
                         map_wave[i, j] = max(map_wave[i, j], detH[i, j, k])
 
                     if scaleMap is not None:
-                        scaleMap[i, j] = 1.0 * (1.5 ** k)
+                        t0 = 1.0  # Should match ScaleSpaceRepresentation
+                        tFactor = 1.5  # Should match ScaleSpaceRepresentation
+                        scaleMap[i, j] = t0 * (tFactor ** k)
 
         return np.array(Maxes)
 
@@ -264,7 +290,8 @@ def GetMaxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=
 def FindHessianBlobs(im, detH, LG, minResponse, particleType, maxCurvatureRatio):
     """Find Hessian blobs by detecting scale-space extrema."""
     try:
-        # Square the minResponse
+        # Square the minResponse, since the parameter is provided as the square root
+        # of the actual minimum detH response so that it is in normal image units
         minResponse = minResponse ** 2
 
         # mapNum: Map identifying particle numbers
@@ -304,60 +331,77 @@ def FindHessianBlobs(im, detH, LG, minResponse, particleType, maxCurvatureRatio)
                     if ((particleType == -1 and LG[i, j, k] < 0) or (particleType == 1 and LG[i, j, k] > 0)):
                         continue
 
-                    # Check if it is a local maximum
-                    is_max = True
-                    for di in [-1, 0, 1]:
-                        for dj in [-1, 0, 1]:
-                            for dk in [-1, 0, 1]:
-                                if di == 0 and dj == 0 and dk == 0:
-                                    continue
-                                ni, nj, nk = i + di, j + dj, k + dk
-                                if (0 <= ni < limI and 0 <= nj < limJ and 0 <= nk < limK):
-                                    if detH[ni, nj, nk] > detH[i, j, k]:
-                                        is_max = False
-                                        break
-                            if not is_max:
-                                break
-                        if not is_max:
-                            break
+                    # There are 26 neighbors in three dimensions.. Have to check if it is a local maximum
+                    strictlyGreater = max(detH[i - 1, j - 1, k - 1],
+                                          max(detH[i - 1, j - 1, k],
+                                              max(detH[i - 1, j, k - 1], detH[i, j - 1, k - 1])))
+                    strictlyGreater = max(strictlyGreater,
+                                          max(detH[i, j, k - 1],
+                                              max(detH[i, j - 1, k], detH[i - 1, j, k])))
 
-                    if not is_max:
+                    if not (detH[i, j, k] > strictlyGreater):
+                        continue
+
+                    greaterOrEqual = detH[i - 1, j - 1, k + 1]
+                    greaterOrEqual = max(greaterOrEqual, detH[i - 1, j, k + 1])
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i - 1, j + 1, k - 1],
+                                             max(detH[i - 1, j + 1, k], detH[i - 1, j + 1, k + 1])))
+
+                    greaterOrEqual = max(greaterOrEqual, detH[i, j - 1, k + 1])
+                    greaterOrEqual = max(greaterOrEqual, detH[i, j, k + 1])
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i, j + 1, k - 1],
+                                             max(detH[i, j + 1, k], detH[i, j + 1, k + 1])))
+
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j - 1, k - 1],
+                                             max(detH[i + 1, j - 1, k], detH[i + 1, j - 1, k + 1])))
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j, k - 1],
+                                             max(detH[i + 1, j, k], detH[i + 1, j, k + 1])))
+                    greaterOrEqual = max(greaterOrEqual,
+                                         max(detH[i + 1, j + 1, k - 1],
+                                             max(detH[i + 1, j + 1, k], detH[i + 1, j + 1, k + 1])))
+
+                    if not (detH[i, j, k] >= greaterOrEqual):
                         continue
 
                     # It's a local max, is it overlapped and bigger than another one already?
                     if mapNum[i, j, k] > -1:
-                        Info[mapNum[i, j, k]][0] = i
-                        Info[mapNum[i, j, k]][1] = j
-                        Info[mapNum[i, j, k]][3] = detH[i, j, k]
+                        if detH[i, j, k] > Info[mapNum[i, j, k]][3]:
+                            # Replace the weaker particle
+                            Info[mapNum[i, j, k]][0] = i  # P Seed
+                            Info[mapNum[i, j, k]][1] = j  # Q Seed
+                            Info[mapNum[i, j, k]][2] = k  # K Seed (scale)
+                            Info[mapNum[i, j, k]][3] = detH[i, j, k]  # Blob strength
+                            mapLG[i, j, k] = LG[i, j, k]
+                            mapMax[i, j, k] = detH[i, j, k]
                         continue
 
-                    # It's a local max, proceed to fill out the feature
-                    numPixels, boundingBox = ScanlineFill8_LG(detH, mapMax, LG, i, j, k, 0, mapNum, cnt)
+                    # New particle found
+                    particle_info = [
+                        i,  # P Seed (x-position)
+                        j,  # Q Seed (y-position)
+                        k,  # K Seed (scale layer)
+                        detH[i, j, k],  # Blob strength
+                        0, 0, 0, 0,  # Bounding box (will be filled later)
+                        0, 0, 0,  # Other measurements (will be filled later)
+                        1,  # Maximal flag (1 = maximal)
+                        0, 0, 0, 0  # Additional flags and measurements
+                    ]
 
-                    if numPixels > 0:
-                        particle_info = [0] * 15
-                        particle_info[0] = i
-                        particle_info[1] = j
-                        particle_info[2] = numPixels
-                        particle_info[3] = detH[i, j, k]
-                        particle_info[4] = boundingBox[0]
-                        particle_info[5] = boundingBox[1]
-                        particle_info[6] = boundingBox[2]
-                        particle_info[7] = boundingBox[3]
-                        particle_info[8] = 1.0 * (1.5 ** k)  # scale
-                        particle_info[9] = k
-                        particle_info[10] = 1
-                        Info.append(particle_info)
-                        cnt += 1
-
-        # Make the mapLG
-        mapLG = np.where(mapNum != -1, detH, 0)
+                    Info.append(particle_info)
+                    mapNum[i, j, k] = cnt
+                    mapLG[i, j, k] = LG[i, j, k]
+                    mapMax[i, j, k] = detH[i, j, k]
+                    cnt += 1
 
         return mapNum, mapLG, mapMax, Info
 
     except Exception as e:
         handle_error("FindHessianBlobs", e)
-        return np.full(detH.shape, -1, dtype=int), np.zeros_like(detH), np.zeros_like(detH), []
+        raise HessianBlobError(f"Failed to find Hessian blobs: {e}")
 
 def MaximalBlobs(info, mapNum):
     """Determine scale-maximal particles."""

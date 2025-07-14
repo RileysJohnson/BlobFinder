@@ -277,19 +277,21 @@ Example: minHeight=0, maxHeight=5e-9
         return result[0]
 
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
-    """Lets the user interactively choose a blob strength - EXACT IGOR PRO INTERFACE."""
+    """Lets the user interactively choose a blob strength for the determinant of Hessian."""
     try:
         # First identify the maxes
-        SS_MAXMAP = np.full_like(im, -1)
+        SS_MAXMAP = np.full_like(im, -1.0)
         SS_MAXSCALEMAP = np.zeros_like(im)
         Maxes = GetMaxes(detH, LG, particleType, maxCurvatureRatio, map_wave=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
-        Maxes = np.sqrt(np.maximum(Maxes, 0))  # Put it into image units
 
-        if len(Maxes) == 0:
+        # Put it into image units - Igor Pro applies Sqrt() to maxes values
+        Maxes_sqrt = np.sqrt(np.maximum(Maxes, 0))
+
+        if len(Maxes_sqrt) == 0:
             safe_print("No maxima found for interactive threshold selection.")
             return 0.0
 
-        # CRITICAL: Ensure thread-safe matplotlib backend
+        # Ensure thread-safe matplotlib backend
         import matplotlib
         matplotlib.use('TkAgg')
 
@@ -304,11 +306,12 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
         ax.set_title('Interactive Blob Strength Selection\nAdjust slider to see detected blobs',
                      fontsize=14, fontweight='bold')
 
-        SS_THRESH = np.max(Maxes) / 2
+        # Igor Pro: SS_THRESH = WaveMax(Maxes)/2
+        SS_THRESH = np.max(Maxes_sqrt) / 2
 
         # Create slider panel exactly like Igor Pro
         ax_slider = plt.axes([0.2, 0.1, 0.5, 0.03])
-        slider = Slider(ax_slider, 'Blob Strength', 0, np.max(Maxes) * 1.1,
+        slider = Slider(ax_slider, 'Blob Strength', 0, np.max(Maxes_sqrt) * 1.1,
                         valinit=SS_THRESH, valfmt='%.3e')
 
         # Create text display for current threshold value
@@ -328,6 +331,9 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
                     pass
             circles.clear()
 
+            # Igor Pro compares Map[i][j]>S_Struct.curval^2
+            # Since SS_MAXMAP contains the original detH values (not sqrt),
+            # we need to square the threshold for comparison
             thresh_squared = thresh ** 2
             count = 0
             for i in range(SS_MAXMAP.shape[0]):
@@ -335,10 +341,11 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
                     if SS_MAXMAP[i, j] > thresh_squared:
                         xc = j  # Column is x-coordinate
                         yc = i  # Row is y-coordinate
+
+                        # Igor Pro: rad = sqrt(2*SS_MAXSCALEMAP[i,j])
                         rad = max(2, np.sqrt(2 * SS_MAXSCALEMAP[i, j]))
 
-                        # FIXED: Create RED circles exactly like Igor Pro Figure 17
-                        # Using bright red color that stands out on hot colormap
+                        # Create RED circles exactly like Igor Pro Figure 17
                         circle = plt.Circle((xc, yc), rad, color='red', fill=False,
                                             linewidth=2.5, alpha=0.9)
                         ax.add_patch(circle)
@@ -392,7 +399,7 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
         safe_print("- Red circles show detected particles")
         safe_print("- Click 'Accept' when satisfied with detection")
 
-        # CRITICAL: Use blocking show() to prevent threading issues
+        # Use blocking show() to prevent threading issues
         plt.show(block=True)
 
         return result[0]
