@@ -308,158 +308,118 @@ Example: minHeight=0, maxHeight=5e-9
         root.mainloop()
         return result[0]
 
-
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
-    """
-    Lets the user interactively choose a blob strength for the determinant of Hessian.
-    This function is ONLY called when detHResponseThresh == -2.
-
-    Args:
-        im: The image under analysis
-        detH: The determinant of Hessian blob detector
-        LG: The Laplacian of Gaussian blob detector
-        particleType: 1 to consider positive Hessian blobs, 0 to consider negative Hessian blobs
-        maxCurvatureRatio: Maximum ratio of the principal curvatures of a blob
-
-    Returns:
-        returnVal: The chosen threshold value (SS_THRESH)
-    """
+    """Interactive threshold selection"""
     try:
-        # First identify the maxes (exactly like Igor Pro)
-        SS_MAXMAP = np.full_like(im, -1.0)  # Igor Pro: Multithread Map = -1
+        # Igor Pro: First identify the maxes
+        # Igor Pro: Duplicate/O im, SS_MAXMAP
+        SS_MAXMAP = np.full_like(im, -1, dtype=np.float64)
         SS_MAXSCALEMAP = np.zeros_like(im)
-        Maxes = GetMaxes(detH, LG, particleType, maxCurvatureRatio,
-                         map_wave=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
 
-        # Put it into image units - Igor Pro: Maxes = Sqrt(Maxes)
-        Maxes_sqrt = np.sqrt(np.maximum(Maxes, 0))
+        # Igor Pro: Wave Maxes = Maxes(detH,LG,particleType,maxCurvatureRatio,map=Map,scaleMap=ScaleMap)
+        from core.blob_detection import Maxes
+        MaxesArray = Maxes(detH, LG, particleType, maxCurvatureRatio, map=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
 
-        if len(Maxes_sqrt) == 0:
-            safe_print("No maxima found for interactive threshold selection.")
+        if len(MaxesArray) == 0:
             return 0.0
 
-        # Ensure thread-safe matplotlib backend
-        import matplotlib
-        matplotlib.use('TkAgg')
-
-        # Close any existing plots
-        plt.close('all')
+        # Igor Pro: Maxes = Sqrt(Maxes) // Put it into image units
+        Maxes_sqrt = np.sqrt(MaxesArray)
 
         # Create interactive plot exactly matching Igor Pro Figure 17
         fig, ax = plt.subplots(figsize=(12, 8))
-        plt.subplots_adjust(bottom=0.25, right=0.8)
+        plt.subplots_adjust(bottom=0.25, right=0.75)
 
-        # Display image exactly like Igor Pro: NewImage/N=IMAGE im
-        im_display = ax.imshow(im, cmap='gray', interpolation='bilinear')
-        ax.set_title('Interactive Blob Strength Selection\nAdjust slider to see detected blobs',
-                     fontsize=14, fontweight='bold')
+        # Igor Pro: NewImage/N=IMAGE im
+        im_display = ax.imshow(im, cmap='gray', interpolation='nearest')
+        ax.set_title('IMAGE:Original', fontsize=12, loc='left')
 
         # Igor Pro: Variable/G SS_THRESH = WaveMax(Maxes)/2
         SS_THRESH = np.max(Maxes_sqrt) / 2
 
-        # Create slider panel exactly like Igor Pro
+        # Create control panel exactly like Igor Pro
+        # Igor Pro: NewPanel/EXT=0 /HOST=IMAGE /N=SubControl /W=(0,0,200,550) as "Continue Button"
+
+        # Create slider exactly like Igor Pro
         # Igor Pro: Slider ThreshSlide limits={0,WaveMax(Maxes)*1.1,WaveMax(Maxes)*1.1/200}
         max_val = np.max(Maxes_sqrt) * 1.1
         ax_slider = plt.axes([0.2, 0.1, 0.5, 0.03])
         slider = Slider(ax_slider, 'Blob Strength', 0, max_val,
                         valinit=SS_THRESH, valfmt='%.3e')
 
-        # Create text display for current threshold value - exactly like Igor Pro SetVariable
-        ax_text = plt.axes([0.82, 0.5, 0.15, 0.3])
-        ax_text.axis('off')
-        threshold_text = ax_text.text(0.1, 0.9, f'Blob Strength:\n{SS_THRESH:.3e}',
-                                      fontsize=10, transform=ax_text.transAxes)
+        # Right panel for controls - matching Igor Pro layout
+        ax_controls = plt.axes([0.77, 0.3, 0.2, 0.5])
+        ax_controls.axis('off')
+        ax_controls.text(0.1, 0.9, 'Continue Button', fontsize=12, fontweight='bold',
+                         transform=ax_controls.transAxes)
+
+        # Igor Pro: SetVariable ThreshSetVar title="Blob Strength"
+        threshold_text = ax_controls.text(0.1, 0.7, f'Blob Strength:\n{SS_THRESH:.3e}',
+                                          fontsize=10, transform=ax_controls.transAxes)
 
         circles = []
 
         def update_display(thresh):
-            """Igor Pro InteractiveSlider function equivalent"""
-            # Clear previous circles - Igor Pro: SetDrawLayer/K /W=IMAGE overlay
+            """Igor Pro InteractiveSlider function equivalent."""
+            # Igor Pro: SetDrawLayer/K /W=IMAGE overlay
             for circle in circles:
-                try:
-                    circle.remove()
-                except:
-                    pass
+                circle.remove()
             circles.clear()
 
-            # Igor Pro comparison: If(Map[i][j]>S_Struct.curval^2)
-            # Since SS_MAXMAP contains the original detH values (not sqrt),
-            # we need to square the threshold for comparison
-            thresh_squared = thresh ** 2
             count = 0
+            limI, limJ = SS_MAXMAP.shape
 
-            # Igor Pro loop structure exactly
-            limI, limJ = SS_MAXMAP.shape[0], SS_MAXMAP.shape[1]
+            # Igor Pro: For(i=0;i<limI;i+=1) For(j=0;j<limJ;j+=1)
             for i in range(limI):
                 for j in range(limJ):
-                    if SS_MAXMAP[i, j] > thresh_squared:
-                        # Igor Pro coordinate conversion:
-                        # xc = DimOffset(map,0)+i*DimDelta(map,0)
-                        # yc = DimOffset(map,1)+j*DimDelta(map,1)
-                        xc = j  # Column is x-coordinate
-                        yc = i  # Row is y-coordinate
+                    # Igor Pro: If(Map[i][j]>S_Struct.curval^2)
+                    if SS_MAXMAP[i, j] > thresh ** 2:
+                        # Igor Pro: xc = DimOffset(map,0)+i*DimDelta(map,0)
+                        # Igor Pro: yc = DimOffset(map,1)+j*DimDelta(map,1)
+                        xc = j  # Column coordinate
+                        yc = i  # Row coordinate
 
-                        # Igor Pro: rad = sqrt(2*SS_MAXSCALEMAP[i,j])
-                        rad = max(2, np.sqrt(2 * SS_MAXSCALEMAP[i, j]))
+                        # Igor Pro: rad = ScaleMap[i][j]
+                        rad = max(1.0, SS_MAXSCALEMAP[i, j])
 
-                        # Create RED circles exactly like Igor Pro Figure 17
-                        # Igor Pro: SetDrawEnv xCoord= prel,yCoord= prel,linefgc= (65280,0,0)
-                        circle = plt.Circle((xc, yc), rad, color='red', fill=False,
-                                            linewidth=2.5, alpha=0.9)
+                        # Igor Pro: SetDrawEnv xCoord= prel,yCoord= prel,linethick= 2,linefgc= (65535,16385,16385)
+                        circle = plt.Circle((xc, yc), rad, fill=False, color='red', linewidth=2)
                         ax.add_patch(circle)
                         circles.append(circle)
                         count += 1
 
-            # Update title and text display exactly like Igor Pro
-            ax.set_title(f'Interactive Blob Strength Selection\n'
-                         f'Blob Strength: {thresh:.3e}, Particles: {count}',
-                         fontsize=14, fontweight='bold')
+            # Update display
+            ax.set_title(f'IMAGE:Original\nBlob Strength: {thresh:.3e}, Particles: {count}',
+                         fontsize=12, loc='left')
+            threshold_text.set_text(f'Blob Strength:\n{thresh:.3e}\n\n{count} particles')
+            fig.canvas.draw_idle()
 
-            threshold_text.set_text(f'Blob Strength:\n{thresh:.3e}\n\nParticles: {count}')
-
-            # Thread-safe canvas update
-            try:
-                fig.canvas.draw_idle()
-            except:
-                pass
-
-        # Connect slider to update function
         slider.on_changed(update_display)
-        update_display(SS_THRESH)  # Initial display
+        update_display(SS_THRESH)
 
-        # Create Accept and Quit buttons exactly like Igor Pro
-        # Igor Pro: Button btn pos={0,0}, size={100,50}, title="Accept"
-        # Igor Pro: Button btnQuit pos={100,0}, size={100,50}, title="Quit"
-        ax_accept = plt.axes([0.7, 0.02, 0.1, 0.04])
-        ax_quit = plt.axes([0.81, 0.02, 0.1, 0.04])
+        # Igor Pro: Button btn title="Accept"
+        # Igor Pro: Button btnQuit title="Quit"
+        ax_accept = plt.axes([0.77, 0.15, 0.08, 0.05])
+        ax_quit = plt.axes([0.86, 0.15, 0.08, 0.05])
         button_accept = Button(ax_accept, 'Accept')
         button_quit = Button(ax_quit, 'Quit')
 
         result = [SS_THRESH]
 
         def accept_threshold(event):
-            """Igor Pro InteractiveContinue function equivalent"""
+            """Igor Pro InteractiveContinue function equivalent."""
+            # Igor Pro: If( B_Struct.eventCode==2 ) KillWindow/Z IMAGE
             result[0] = slider.val
             plt.close(fig)
 
         def quit_threshold(event):
-            """Igor Pro InteractiveQuit function equivalent"""
-            # Igor Pro quits the entire analysis
-            result[0] = SS_THRESH  # Keep original value
+            """Igor Pro InteractiveQuit function equivalent."""
+            # Igor Pro: KillWindow/Z IMAGE, Abort
+            result[0] = SS_THRESH
             plt.close(fig)
 
         button_accept.on_clicked(accept_threshold)
         button_quit.on_clicked(quit_threshold)
-
-        # Add instructions exactly like Igor Pro
-        instructions_text = ('Use the slider to adjust blob strength threshold.\n'
-                             'Red circles show detected particles.\n'
-                             'Click "Accept" when satisfied with detection.')
-
-        ax_instructions = plt.axes([0.82, 0.25, 0.15, 0.2])
-        ax_instructions.axis('off')
-        ax_instructions.text(0.1, 0.9, instructions_text, fontsize=9,
-                             transform=ax_instructions.transAxes, wrap=True)
 
         # Igor Pro: PauseForUser IMAGE
         plt.show()
@@ -468,8 +428,6 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
         returnVal = result[0]
 
         # Igor Pro: KillVariables/Z SS_THRESH, KillWaves/Z Map
-        # (Python garbage collection handles this)
-
         return returnVal
 
     except Exception as e:

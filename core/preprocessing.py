@@ -12,6 +12,7 @@
 
 import numpy as np
 import tkinter as tk
+import os
 from tkinter import filedialog, messagebox, simpledialog
 import threading
 import matplotlib.pyplot as plt
@@ -19,6 +20,27 @@ from matplotlib.widgets import Slider, Button
 from utils.data_manager import DataManager
 from utils.error_handler import handle_error, HessianBlobError, safe_print
 from utils.igor_compat import GetDataFolder
+
+
+def dyMap(image):
+    """Create dy map for streak detection"""
+    try:
+        # Create dY map exactly like Igor Pro
+        dy_map = np.zeros_like(image)
+
+        # Calculate Y derivatives using central difference
+        # Igor Pro uses simple difference: image[i][j+1] - image[i][j-1]
+        dy_map[:, 1:-1] = image[:, 2:] - image[:, :-2]
+
+        # Handle boundaries - Igor Pro sets edges to zero
+        dy_map[:, 0] = 0
+        dy_map[:, -1] = 0
+
+        return dy_map
+
+    except Exception as e:
+        handle_error("dyMap", e)
+        return np.zeros_like(image)
 
 def BatchPreprocess():
     """Preprocess multiple images - IGOR PRO EXACT BEHAVIOR."""
@@ -360,14 +382,14 @@ def _get_flatten_threshold_interactive(im):
         return np.mean(im) + 0.5 * np.std(im)
 
 def RemoveStreaks(image, sigma=3):
-    """Removes streak artifacts from the image - EXACT IGOR PRO ALGORITHM."""
+    """Removes streak artifacts from the image"""
     try:
-        # CRITICAL FIX: Ensure image is writable by making a copy if needed
+        # Ensure image is writable by making a copy if needed
         if not image.flags.writeable:
             image = image.copy()
 
         # Produce the dY map exactly like Igor Pro
-        dy_map = dyMap_func(image)
+        dy_map = dyMap(image)
         dy_map = np.abs(dy_map)
 
         # Calculate statistics - matching Igor Pro exactly
