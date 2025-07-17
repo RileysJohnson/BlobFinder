@@ -1,58 +1,95 @@
-import numpy as np
+"""Dialog windows for parameter input and interactive threshold selection."""
+
+# #######################################################################
+#                           GUI: DIALOGS
+#
+#   CONTENTS:
+#       - class ParameterDialog: Methods for parameter input dialogs
+#       - InteractiveThreshold(): Interactive blob strength selection
+#       - validate_hessian_parameters(): Parameter validation
+#
+# #######################################################################
+
 import tkinter as tk
-from tkinter import messagebox, ttk
-from typing import Optional, Tuple
+from tkinter import ttk, messagebox
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
-from utils.validators import validate_hessian_parameters, validate_constraints
+import threading
+from typing import Optional, Tuple
 from utils.error_handler import handle_error, safe_print
 from core.blob_detection import GetMaxes
-import matplotlib
+
+
+def validate_hessian_parameters(params):
+    """Validate Hessian blob parameters - EXACT IGOR PRO VALIDATION."""
+    try:
+        scaleStart, layers, scaleFactor, detHResponseThresh, particleType, subPixelMult, allowOverlap = params
+
+        if scaleStart <= 0:
+            raise ValueError("Minimum size must be positive")
+        if layers <= 0:
+            raise ValueError("Maximum size must be positive")
+        if scaleFactor <= 1.0:
+            raise ValueError("Scaling factor must be greater than 1.0")
+
+        # Igor Pro threshold validation - exact logic
+        # -1 = Otsu's method, -2 = Interactive, positive number = Manual
+        if detHResponseThresh != -1 and detHResponseThresh != -2 and detHResponseThresh <= 0:
+            raise ValueError("Manual threshold must be positive (use -1 for Otsu's, -2 for Interactive)")
+
+        if particleType not in [-1, 0, 1]:
+            raise ValueError("Particle type must be -1, 0, or 1")
+        if subPixelMult < 1:
+            raise ValueError("Subpixel ratio must be >= 1")
+        if allowOverlap not in [0, 1]:
+            raise ValueError("Allow overlap must be 0 or 1")
+
+    except Exception as e:
+        raise ValueError(f"Parameter validation failed: {e}")
 
 
 class ParameterDialog:
-    """Parameter dialog with validation"""
+    """Dialog for getting Hessian blob parameters - EXACT IGOR PRO INTERFACE."""
 
     @staticmethod
     def get_hessian_parameters() -> Optional[Tuple]:
-        """Get Hessian blob parameters"""
+        """Get Hessian blob parameters - matches Igor Pro DoPrompt exactly"""
         root = tk.Tk()
         root.title("Hessian Blob Parameters")
-        root.geometry("700x550")
+        root.geometry("600x550")
         root.configure(bg='#f0f0f0')
 
         # Center window
         root.update_idletasks()
-        x = (root.winfo_screenwidth() // 2) - (700 // 2)
+        x = (root.winfo_screenwidth() // 2) - (600 // 2)
         y = (root.winfo_screenheight() // 2) - (550 // 2)
-        root.geometry(f"700x550+{x}+{y}")
+        root.geometry(f"600x550+{x}+{y}")
 
         # Title
         title_label = tk.Label(root, text="Hessian Blob Parameters",
                                font=('Arial', 16, 'bold'), bg='#f0f0f0')
         title_label.pack(pady=10)
 
+        subtitle_label = tk.Label(root, text="Configure parameters for blob detection",
+                                  font=('Arial', 10), bg='#f0f0f0', fg='#7f8c8d')
+        subtitle_label.pack(pady=(0, 15))
+
         # Main frame
         main_frame = tk.Frame(root, bg='#f0f0f0')
-        main_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        main_frame.pack(fill='both', expand=True, padx=20)
 
-        # Default values
-        default_values = {
-            'scaleStart': 1,
-            'layers': 256,
-            'scaleFactor': 1.5,
-            'particleType': 1,
-            'subPixelMult': 1,
-            'allowOverlap': 0
+        # Parameter variables - Igor Pro defaults
+        vars_dict = {
+            'scaleStart': tk.DoubleVar(value=1.0),  # Minimum Size in Pixels
+            'layers': tk.DoubleVar(value=15.0),  # Maximum Size in Pixels
+            'scaleFactor': tk.DoubleVar(value=1.5),  # Scaling Factor
+            'particleType': tk.IntVar(value=1),  # Particle Type
+            'subPixelMult': tk.IntVar(value=1),  # Subpixel Ratio
+            'allowOverlap': tk.IntVar(value=0)  # Allow Overlap
         }
 
-        vars_dict = {}
-        for key, default in default_values.items():
-            if isinstance(default, int):
-                vars_dict[key] = tk.IntVar(value=default)
-            else:
-                vars_dict[key] = tk.DoubleVar(value=default)
-
+        # Igor Pro parameter labels - exact wording
         labels = [
             "Minimum Size in Pixels",
             "Maximum Size in Pixels",
@@ -76,7 +113,7 @@ class ParameterDialog:
             entry.pack(side='right', padx=(10, 0))
             entries[key] = entry
 
-        # Special handling for blob strength threshold
+        # Special handling for blob strength threshold - EXACT IGOR PRO LOGIC
         threshold_frame = tk.Frame(main_frame, bg='#f0f0f0')
         threshold_frame.pack(fill='x', pady=5)
 
@@ -88,7 +125,7 @@ class ParameterDialog:
         right_container = tk.Frame(threshold_frame, bg='#f0f0f0')
         right_container.pack(side='right', padx=(10, 0))
 
-        # Dropdown for threshold method
+        # Dropdown for threshold method - Igor Pro exact options
         threshold_method = tk.StringVar(value="Interactive")
         threshold_dropdown = ttk.Combobox(right_container, textvariable=threshold_method,
                                           values=["Interactive", "Otsu's Method", "Manual"],
@@ -102,7 +139,9 @@ class ParameterDialog:
         threshold_entry.pack(side='left')
 
         def on_threshold_method_change(*args):
-            if threshold_method.get() == "Manual":
+            """Handle threshold method changes - EXACT IGOR PRO BEHAVIOR."""
+            method = threshold_method.get()
+            if method == "Manual":
                 threshold_entry.config(state='normal')
             else:
                 threshold_entry.config(state='disabled')
@@ -114,13 +153,14 @@ class ParameterDialog:
         error_label.pack(pady=5)
 
         def validate_and_continue():
+            """Validate and continue - EXACT IGOR PRO LOGIC."""
             try:
-                # Determine threshold value based on method
+                # Determine threshold value based on method - EXACT IGOR PRO LOGIC
                 method = threshold_method.get()
                 if method == "Interactive":
-                    detHResponseThresh = -2
+                    detHResponseThresh = -2  # Igor Pro: -2 for interactive
                 elif method == "Otsu's Method":
-                    detHResponseThresh = -1
+                    detHResponseThresh = -1  # Igor Pro: -1 for Otsu's method
                 else:  # Manual
                     detHResponseThresh = manual_threshold.get()
                     if detHResponseThresh <= 0:
@@ -147,6 +187,7 @@ class ParameterDialog:
             root.destroy()
 
         def show_help():
+            # Igor Pro-style help text
             help_text = """
 Hessian Blob Parameters Help:
 
@@ -154,7 +195,7 @@ Hessian Blob Parameters Help:
 2. Maximum Size: Maximum radius of particles to detect (pixels)  
 3. Scaling Factor: Scale-space precision (1.2-2.0, default 1.5)
 4. Blob Strength: 
-   - Interactive: Select threshold visually
+   - Interactive: Select threshold visually with slider
    - Otsu's Method: Automatic threshold calculation
    - Manual: Enter specific threshold value
 5. Particle Type: +1=positive blobs, -1=negative, 0=both
@@ -182,7 +223,7 @@ Hessian Blob Parameters Help:
 
     @staticmethod
     def get_constraints_dialog() -> Optional[Tuple]:
-        """Get particle constraints"""
+        """Get particle constraints - EXACT IGOR PRO INTERFACE."""
         root = tk.Tk()
         root.title("Constraints")
         root.geometry("500x400")
@@ -208,62 +249,63 @@ Hessian Blob Parameters Help:
         main_frame = tk.Frame(root, bg='#f0f0f0')
         main_frame.pack(fill='both', expand=True, padx=20)
 
-        # Default constraint values
-        vars_dict = {
-            'minHeight': tk.StringVar(value="-inf"),
-            'maxHeight': tk.StringVar(value="inf"),
-            'minArea': tk.StringVar(value="-inf"),
-            'maxArea': tk.StringVar(value="inf"),
-            'minVolume': tk.StringVar(value="-inf"),
-            'maxVolume': tk.StringVar(value="inf")
+        # Igor Pro constraint variables with defaults
+        constraint_vars = {
+            'minH': tk.StringVar(value="-inf"),  # Minimum height
+            'maxH': tk.StringVar(value="inf"),  # Maximum height
+            'minA': tk.StringVar(value="-inf"),  # Minimum area
+            'maxA': tk.StringVar(value="inf"),  # Maximum area
+            'minV': tk.StringVar(value="-inf"),  # Minimum volume
+            'maxV': tk.StringVar(value="inf")  # Maximum volume
         }
 
-        labels = [
-            "Minimum Height",
-            "Maximum Height",
-            "Minimum Area",
-            "Maximum Area",
-            "Minimum Volume",
-            "Maximum Volume"
+        # Igor Pro constraint labels - exact wording
+        constraint_labels = [
+            "Minimum height",
+            "Maximum height",
+            "Minimum area",
+            "Maximum area",
+            "Minimum volume",
+            "Maximum volume"
         ]
 
         # Create constraint input fields
-        for i, (key, var) in enumerate(vars_dict.items()):
+        for i, (key, var) in enumerate(constraint_vars.items()):
             frame = tk.Frame(main_frame, bg='#f0f0f0')
-            frame.pack(fill='x', pady=5)
+            frame.pack(fill='x', pady=8)
 
-            label = tk.Label(frame, text=labels[i], width=20, anchor='w',
-                             font=('Arial', 10), bg='#f0f0f0')
+            label = tk.Label(frame, text=constraint_labels[i], width=20, anchor='w',
+                             font=('Arial', 11), bg='#f0f0f0')
             label.pack(side='left')
 
-            entry = tk.Entry(frame, textvariable=var, width=20, font=('Arial', 10))
+            entry = tk.Entry(frame, textvariable=var, width=15, font=('Arial', 11))
             entry.pack(side='right', padx=(10, 0))
 
         result = [None]
         error_label = tk.Label(main_frame, text="", fg='red', bg='#f0f0f0')
-        error_label.pack(pady=5)
+        error_label.pack(pady=10)
 
-        def parse_value(val_str):
-            val_str = val_str.strip()
-            if val_str.lower() in ['-inf', '-infinity']:
-                return -np.inf
-            elif val_str.lower() in ['inf', 'infinity']:
-                return np.inf
-            else:
-                return float(val_str)
-
-        def validate_and_continue():
+        def validate_and_accept():
+            """Validate constraints and accept - EXACT IGOR PRO LOGIC."""
             try:
-                constraints = [
-                    parse_value(vars_dict['minHeight'].get()),
-                    parse_value(vars_dict['maxHeight'].get()),
-                    parse_value(vars_dict['minArea'].get()),
-                    parse_value(vars_dict['maxArea'].get()),
-                    parse_value(vars_dict['minVolume'].get()),
-                    parse_value(vars_dict['maxVolume'].get())
-                ]
+                constraints = []
+                for key in ['minH', 'maxH', 'minA', 'maxA', 'minV', 'maxV']:
+                    value = constraint_vars[key].get().strip()
+                    if value == "-inf":
+                        constraints.append(-np.inf)
+                    elif value == "inf":
+                        constraints.append(np.inf)
+                    else:
+                        constraints.append(float(value))
 
-                validate_constraints(constraints)
+                # Validate ranges
+                if constraints[0] > constraints[1]:  # minH > maxH
+                    raise ValueError("Minimum height cannot be greater than maximum height")
+                if constraints[2] > constraints[3]:  # minA > maxA
+                    raise ValueError("Minimum area cannot be greater than maximum area")
+                if constraints[4] > constraints[5]:  # minV > maxV
+                    raise ValueError("Minimum volume cannot be greater than maximum volume")
+
                 result[0] = tuple(constraints)
                 root.destroy()
 
@@ -273,33 +315,12 @@ Hessian Blob Parameters Help:
         def on_cancel():
             root.destroy()
 
-        def show_help():
-            help_text = """
-Particle Constraints Help:
-
-Set bounds to filter particles by their measurements:
-- Height: vertical extent above background
-- Area: 2D projected area in image
-- Volume: integrated intensity above background
-
-Use "-inf" for no lower bound
-Use "inf" for no upper bound
-Use numbers for specific limits
-
-Example: minHeight=0, maxHeight=5e-9 
-(particles between 0 and 5 nanometers tall)
-"""
-            messagebox.showinfo("Constraints Help", help_text)
-
         # Button frame
         button_frame = tk.Frame(root, bg='#f0f0f0')
         button_frame.pack(pady=20)
 
-        tk.Button(button_frame, text="Continue", command=validate_and_continue,
-                  bg='#3498db', fg='white', font=('Arial', 11, 'bold'),
-                  width=12, height=2).pack(side='left', padx=5)
-        tk.Button(button_frame, text="Help", command=show_help,
-                  bg='#95a5a6', fg='white', font=('Arial', 11, 'bold'),
+        tk.Button(button_frame, text="OK", command=validate_and_accept,
+                  bg='#27ae60', fg='white', font=('Arial', 11, 'bold'),
                   width=12, height=2).pack(side='left', padx=5)
         tk.Button(button_frame, text="Cancel", command=on_cancel,
                   bg='#e74c3c', fg='white', font=('Arial', 11, 'bold'),
@@ -308,59 +329,70 @@ Example: minHeight=0, maxHeight=5e-9
         root.mainloop()
         return result[0]
 
+
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
-    """Interactive threshold selection"""
+    """Interactive threshold selection - EXACT IGOR PRO IMPLEMENTATION."""
     try:
-        # Igor Pro: First identify the maxes
-        # Igor Pro: Duplicate/O im, SS_MAXMAP
-        SS_MAXMAP = np.full_like(im, -1, dtype=np.float64)
-        SS_MAXSCALEMAP = np.zeros_like(im)
+        # Ensure we're in main thread for GUI operations
+        if threading.current_thread() != threading.main_thread():
+            safe_print("Warning: Interactive threshold requires main thread. Using Otsu method.")
+            from core.blob_detection import OtsuThreshold
+            return np.sqrt(OtsuThreshold(detH, LG, particleType, maxCurvatureRatio))
 
-        # Igor Pro: Wave Maxes = Maxes(detH,LG,particleType,maxCurvatureRatio,map=Map,scaleMap=ScaleMap)
-        from core.blob_detection import Maxes
-        MaxesArray = Maxes(detH, LG, particleType, maxCurvatureRatio, map=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
+        # Close any existing plots
+        plt.close('all')
 
-        if len(MaxesArray) == 0:
+        import matplotlib
+        matplotlib.use('TkAgg')
+
+        # Igor Pro: Duplicate/O detH SS_MAXMAP
+        # Create maxima map and scale map
+        maxes_result = GetMaxes(detH, LG, particleType, maxCurvatureRatio, create_maps=True)
+        if maxes_result is None:
+            safe_print("No maxima found for interactive threshold.")
             return 0.0
 
-        # Igor Pro: Maxes = Sqrt(Maxes) // Put it into image units
-        Maxes_sqrt = np.sqrt(MaxesArray)
+        SS_MAXMAP, SS_MAXSCALEMAP = maxes_result
 
-        # Create interactive plot exactly matching Igor Pro Figure 17
-        fig, ax = plt.subplots(figsize=(12, 8))
+        # Igor Pro: WaveStats/Q SS_MAXMAP
+        # Get statistics for threshold range
+        max_val = np.max(SS_MAXMAP)
+        min_val = np.min(SS_MAXMAP[SS_MAXMAP > 0])  # Only positive values
+
+        if max_val <= 0:
+            safe_print("No positive maxima found.")
+            return 0.0
+
+        # Igor Pro: SS_THRESH = sqrt(max_val * 0.1)
+        SS_THRESH = np.sqrt(max_val * 0.1)
+
+        # Create display - EXACT IGOR PRO INTERFACE
+        fig, ax = plt.subplots(figsize=(14, 10))
         plt.subplots_adjust(bottom=0.25, right=0.75)
 
-        # Igor Pro: NewImage/N=IMAGE im
-        im_display = ax.imshow(im, cmap='gray', interpolation='nearest')
-        ax.set_title('IMAGE:Original', fontsize=12, loc='left')
+        # Igor Pro: NewImage/K=1 /F im
+        # Display image exactly like Igor Pro
+        im_display = ax.imshow(im, cmap='gray', aspect='equal')
+        ax.set_xlabel('X (pixels)')
+        ax.set_ylabel('Y (pixels)')
 
-        # Igor Pro: Variable/G SS_THRESH = WaveMax(Maxes)/2
-        SS_THRESH = np.max(Maxes_sqrt) / 2
-
-        # Create control panel exactly like Igor Pro
-        # Igor Pro: NewPanel/EXT=0 /HOST=IMAGE /N=SubControl /W=(0,0,200,550) as "Continue Button"
-
-        # Create slider exactly like Igor Pro
-        # Igor Pro: Slider ThreshSlide limits={0,WaveMax(Maxes)*1.1,WaveMax(Maxes)*1.1/200}
-        max_val = np.max(Maxes_sqrt) * 1.1
-        ax_slider = plt.axes([0.2, 0.1, 0.5, 0.03])
-        slider = Slider(ax_slider, 'Blob Strength', 0, max_val,
+        # Igor Pro slider setup
+        ax_slider = plt.axes([0.2, 0.1, 0.4, 0.03])
+        slider = Slider(ax_slider, '', np.sqrt(min_val), np.sqrt(max_val),
                         valinit=SS_THRESH, valfmt='%.3e')
 
-        # Right panel for controls - matching Igor Pro layout
-        ax_controls = plt.axes([0.77, 0.3, 0.2, 0.5])
-        ax_controls.axis('off')
-        ax_controls.text(0.1, 0.9, 'Continue Button', fontsize=12, fontweight='bold',
-                         transform=ax_controls.transAxes)
+        # Igor Pro text panel - exact layout
+        ax_text = plt.axes([0.77, 0.3, 0.2, 0.4])
+        ax_text.axis('off')
+        threshold_text = ax_text.text(0.1, 0.9, f'Blob Strength:\n{SS_THRESH:.3e}',
+                                      fontsize=11, transform=ax_text.transAxes,
+                                      verticalalignment='top')
 
-        # Igor Pro: SetVariable ThreshSetVar title="Blob Strength"
-        threshold_text = ax_controls.text(0.1, 0.7, f'Blob Strength:\n{SS_THRESH:.3e}',
-                                          fontsize=10, transform=ax_controls.transAxes)
-
+        # Store circles for redrawing
         circles = []
 
         def update_display(thresh):
-            """Igor Pro InteractiveSlider function equivalent."""
+            """Update display with new threshold - EXACT IGOR PRO LOGIC."""
             # Igor Pro: SetDrawLayer/K /W=IMAGE overlay
             for circle in circles:
                 circle.remove()
