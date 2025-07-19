@@ -138,8 +138,14 @@ class ParameterDialog:
                                    font=('Arial', 10), state='disabled')
         threshold_entry.pack(side='left')
 
+        # Help text for threshold
+        help_text_label = tk.Label(main_frame,
+                                   text="(-2 for Interactive, -1 for Otsu's Method, or enter positive value)",
+                                   font=('Arial', 8), bg='#f0f0f0', fg='#7f8c8d')
+        help_text_label.pack(pady=(0, 10))
+
         def on_threshold_method_change(*args):
-            """Handle threshold method changes - EXACT IGOR PRO BEHAVIOR."""
+            """Handle threshold method changes."""
             method = threshold_method.get()
             if method == "Manual":
                 threshold_entry.config(state='normal')
@@ -155,7 +161,7 @@ class ParameterDialog:
         def validate_and_continue():
             """Validate and continue - EXACT IGOR PRO LOGIC."""
             try:
-                # Determine threshold value based on method - EXACT IGOR PRO LOGIC
+                # Determine threshold value based on method - THIS IS THE KEY FIX
                 method = threshold_method.get()
                 if method == "Interactive":
                     detHResponseThresh = -2  # Igor Pro: -2 for interactive
@@ -170,7 +176,7 @@ class ParameterDialog:
                     vars_dict['scaleStart'].get(),
                     vars_dict['layers'].get(),
                     vars_dict['scaleFactor'].get(),
-                    detHResponseThresh,
+                    detHResponseThresh,  # Use the correct value based on selection
                     vars_dict['particleType'].get(),
                     vars_dict['subPixelMult'].get(),
                     vars_dict['allowOverlap'].get()
@@ -189,19 +195,19 @@ class ParameterDialog:
         def show_help():
             # Igor Pro-style help text
             help_text = """
-Hessian Blob Parameters Help:
+    Hessian Blob Parameters Help:
 
-1. Minimum Size: Minimum radius of particles to detect (pixels)
-2. Maximum Size: Maximum radius of particles to detect (pixels)  
-3. Scaling Factor: Scale-space precision (1.2-2.0, default 1.5)
-4. Blob Strength: 
-   - Interactive: Select threshold visually with slider
-   - Otsu's Method: Automatic threshold calculation
-   - Manual: Enter specific threshold value
-5. Particle Type: +1=positive blobs, -1=negative, 0=both
-6. Subpixel Ratio: Subpixel precision multiplier (1=pixel accuracy)
-7. Allow Overlap: 1=allow overlapping particles, 0=no overlap
-"""
+    1. Minimum Size: Minimum radius of particles to detect (pixels)
+    2. Maximum Size: Maximum radius of particles to detect (pixels)  
+    3. Scaling Factor: Scale-space precision (1.2-2.0, default 1.5)
+    4. Blob Strength: 
+       - Interactive: Select threshold visually with slider (-2)
+       - Otsu's Method: Automatic threshold calculation (-1)
+       - Manual: Enter specific threshold value (positive number)
+    5. Particle Type: +1=positive blobs, -1=negative, 0=both
+    6. Subpixel Ratio: Subpixel precision multiplier (1=pixel accuracy)
+    7. Allow Overlap: 1=allow overlapping particles, 0=no overlap
+    """
             messagebox.showinfo("Parameter Help", help_text)
 
         # Button frame
@@ -333,60 +339,74 @@ Hessian Blob Parameters Help:
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     """Interactive threshold selection - EXACT IGOR PRO IMPLEMENTATION."""
     try:
-        # Ensure we're in main thread for GUI operations
-        if threading.current_thread() != threading.main_thread():
-            safe_print("Warning: Interactive threshold requires main thread. Using Otsu method.")
-            from core.blob_detection import OtsuThreshold
-            return np.sqrt(OtsuThreshold(detH, LG, particleType, maxCurvatureRatio))
-
         # Close any existing plots
         plt.close('all')
 
         import matplotlib
         matplotlib.use('TkAgg')
 
-        # Igor Pro: Duplicate/O detH SS_MAXMAP
-        # Create maxima map and scale map
-        maxes_result = GetMaxes(detH, LG, particleType, maxCurvatureRatio, create_maps=True)
-        if maxes_result is None:
-            safe_print("No maxima found for interactive threshold.")
-            return 0.0
+        # Igor Pro: First identify the maxes
+        # Igor Pro: Duplicate/O im, SS_MAXMAP
+        # Igor Pro: Wave Map = SS_MAXMAP
+        # Igor Pro: Multithread Map = -1
+        SS_MAXMAP = np.ones_like(im) * -1
+        SS_MAXSCALEMAP = np.zeros_like(im)
 
-        SS_MAXMAP, SS_MAXSCALEMAP = maxes_result
+        # Igor Pro: Wave Maxes = Maxes(detH,LG,particleType,maxCurvatureRatio,map=Map,scaleMap=ScaleMap)
+        # Get maxes with map creation
+        Maxes = GetMaxes(detH, LG, particleType, maxCurvatureRatio, map=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
 
-        # Igor Pro: WaveStats/Q SS_MAXMAP
-        # Get statistics for threshold range
-        max_val = np.max(SS_MAXMAP)
-        min_val = np.min(SS_MAXMAP[SS_MAXMAP > 0])  # Only positive values
+        # Handle empty maxes
+        if len(Maxes) == 0:
+            safe_print("No maxima found for interactive threshold. Using default range.")
+            # Use determinant of Hessian range instead
+            detH_positive = detH[detH > 0]
+            if len(detH_positive) == 0:
+                safe_print("No positive values in determinant of Hessian.")
+                return 0.001  # Return small positive value
+            Maxes = detH_positive
 
-        if max_val <= 0:
-            safe_print("No positive maxima found.")
-            return 0.0
+        # Igor Pro: Maxes = Sqrt(Maxes) // Put it into image units
+        # Handle any negative values before sqrt
+        Maxes = np.sqrt(np.abs(Maxes))
 
-        # Igor Pro: SS_THRESH = sqrt(max_val * 0.1)
-        SS_THRESH = np.sqrt(max_val * 0.1)
-
+        # Igor Pro: NewImage/N=IMAGE im
         # Create display - EXACT IGOR PRO INTERFACE
-        fig, ax = plt.subplots(figsize=(14, 10))
-        plt.subplots_adjust(bottom=0.25, right=0.75)
+        fig = plt.figure(figsize=(14, 10))
+        ax = fig.add_subplot(111)
+        plt.subplots_adjust(bottom=0.15, right=0.8)
 
-        # Igor Pro: NewImage/K=1 /F im
         # Display image exactly like Igor Pro
         im_display = ax.imshow(im, cmap='gray', aspect='equal')
         ax.set_xlabel('X (pixels)')
         ax.set_ylabel('Y (pixels)')
+        ax.set_title('IMAGE:Original', fontsize=12, loc='left')
 
-        # Igor Pro slider setup
-        ax_slider = plt.axes([0.2, 0.1, 0.4, 0.03])
-        slider = Slider(ax_slider, '', np.sqrt(min_val), np.sqrt(max_val),
-                        valinit=SS_THRESH, valfmt='%.3e')
+        # Igor Pro: Variable/G SS_THRESH = WaveMax(Maxes)/2
+        max_val = np.max(Maxes) if len(Maxes) > 0 else 1.0
+        min_val = np.min(Maxes[Maxes > 0]) if np.any(Maxes > 0) else 0.001
+        SS_THRESH = max_val / 2
 
-        # Igor Pro text panel - exact layout
-        ax_text = plt.axes([0.77, 0.3, 0.2, 0.4])
-        ax_text.axis('off')
-        threshold_text = ax_text.text(0.1, 0.9, f'Blob Strength:\n{SS_THRESH:.3e}',
-                                      fontsize=11, transform=ax_text.transAxes,
-                                      verticalalignment='top')
+        # Create control panel on the right
+        ax_panel = plt.axes([0.82, 0.3, 0.16, 0.4])
+        ax_panel.axis('off')
+
+        # Igor Pro: Button btn pos={0,0}, size={100,50}, title="Accept"
+        # Igor Pro: Button btnQuit pos={100,0}, size={100,50}, title="Quit"
+        ax_accept = plt.axes([0.82, 0.25, 0.07, 0.04])
+        ax_quit = plt.axes([0.90, 0.25, 0.07, 0.04])
+        button_accept = Button(ax_accept, 'Accept')
+        button_quit = Button(ax_quit, 'Quit')
+
+        # Igor Pro: Slider ThreshSlide limits={0,WaveMax(Maxes)*1.1,WaveMax(Maxes)*1.1/200}
+        ax_slider = plt.axes([0.2, 0.05, 0.5, 0.03])
+        slider = Slider(ax_slider, 'Blob Strength', min_val, max_val * 1.1,
+                        valinit=SS_THRESH, valstep=(max_val * 1.1 - min_val) / 200, valfmt='%.3e')
+
+        # Text display
+        threshold_text = ax_panel.text(0.1, 0.9, f'Blob Strength:\n{SS_THRESH:.3e}',
+                                       fontsize=11, transform=ax_panel.transAxes,
+                                       verticalalignment='top')
 
         # Store circles for redrawing
         circles = []
@@ -412,7 +432,10 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
                         yc = i  # Row coordinate
 
                         # Igor Pro: rad = ScaleMap[i][j]
-                        rad = max(1.0, SS_MAXSCALEMAP[i, j])
+                        # The scale is in scale-space units, convert to pixel radius
+                        # In Igor Pro, the radius is sqrt(2 * scale)
+                        scale = SS_MAXSCALEMAP[i, j]
+                        rad = np.sqrt(2 * scale) if scale > 0 else 1.0
 
                         # Igor Pro: SetDrawEnv xCoord= prel,yCoord= prel,linethick= 2,linefgc= (65535,16385,16385)
                         circle = plt.Circle((xc, yc), rad, fill=False, color='red', linewidth=2)
@@ -420,34 +443,24 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
                         circles.append(circle)
                         count += 1
 
-            # Update display
-            ax.set_title(f'IMAGE:Original\nBlob Strength: {thresh:.3e}, Particles: {count}',
-                         fontsize=12, loc='left')
+            # Update text
             threshold_text.set_text(f'Blob Strength:\n{thresh:.3e}\n\n{count} particles')
             fig.canvas.draw_idle()
 
+        # Initialize display
         slider.on_changed(update_display)
         update_display(SS_THRESH)
-
-        # Igor Pro: Button btn title="Accept"
-        # Igor Pro: Button btnQuit title="Quit"
-        ax_accept = plt.axes([0.77, 0.15, 0.08, 0.05])
-        ax_quit = plt.axes([0.86, 0.15, 0.08, 0.05])
-        button_accept = Button(ax_accept, 'Accept')
-        button_quit = Button(ax_quit, 'Quit')
 
         result = [SS_THRESH]
 
         def accept_threshold(event):
             """Igor Pro InteractiveContinue function equivalent."""
-            # Igor Pro: If( B_Struct.eventCode==2 ) KillWindow/Z IMAGE
             result[0] = slider.val
             plt.close(fig)
 
         def quit_threshold(event):
             """Igor Pro InteractiveQuit function equivalent."""
-            # Igor Pro: KillWindow/Z IMAGE, Abort
-            result[0] = SS_THRESH
+            result[0] = 0.001  # Return small positive value on quit
             plt.close(fig)
 
         button_accept.on_clicked(accept_threshold)
@@ -456,12 +469,9 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
         # Igor Pro: PauseForUser IMAGE
         plt.show()
 
-        # Igor Pro: Variable returnVal = SS_THRESH
         returnVal = result[0]
-
-        # Igor Pro: KillVariables/Z SS_THRESH, KillWaves/Z Map
         return returnVal
 
     except Exception as e:
         handle_error("InteractiveThreshold", e)
-        return 0.0
+        return 0.001  # Return small positive value on error

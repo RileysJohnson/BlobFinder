@@ -16,6 +16,7 @@
 import numpy as np
 import os
 import time
+import threading
 from typing import Optional, Tuple
 from tkinter import messagebox, filedialog
 from utils.error_handler import handle_error, safe_print, HessianBlobError
@@ -30,32 +31,46 @@ from utils.measurements import MeasureParticles
 
 
 def HessianBlobs(im, params=None):
-    """Executes the Hessian blob algorithm on an image - EXACT IGOR PRO ALGORITHM."""
+    """
+    Executes the Hessian blob algorithm on an image - EXACT IGOR PRO IMPLEMENTATION.
+
+    Args:
+        im: The image to be analyzed
+        params: Optional parameter wave with the 13 parameters
+
+    Returns:
+        str: Path to the analysis folder or empty string on error
+    """
     try:
-        # Declare algorithm parameters - EXACT IGOR PRO DEFAULTS
-        scaleStart = 1.0                    # In pixel units
-        layers = max(im.shape[0], im.shape[1]) // 4
+        # Declare algorithm parameters - Igor Pro defaults
+        scaleStart = 1  # In pixel units
+        layers = max(im.shape[0], im.shape[1]) / 4
         scaleFactor = 1.5
-        detHResponseThresh = -2             # Use -1 for Otsu's method, -2 for interactive
-        particleType = 1                    # -1 for neg only, 1 for pos only, 0 for both
-        subPixelMult = 1                    # 1 or more, should be integer
+        detHResponseThresh = -2  # Use -1 for Otsu's method, -2 for interactive
+        particleType = 1  # -1 for neg only, 1 for pos only, 0 for both
+        subPixelMult = 1  # 1 or more, should be integer
         allowOverlap = 0
 
-        # Declare measurement ranges - EXACT IGOR PRO DEFAULTS
-        minH, maxH, minV, maxV, minA, maxA = -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf
+        # Declare measurement ranges
+        minH = -np.inf
+        maxH = np.inf
+        minV = -np.inf
+        maxV = np.inf
+        minA = -np.inf
+        maxA = np.inf
 
-        # Retrieve parameters if given in the params wave, or prompt the user for them if not
+        # Retrieve parameters if given, or prompt the user
         if params is None:
-            # Igor Pro: DoPrompt "Hessian Blob Parameters"
-            params = ParameterDialog.get_hessian_parameters()
-            if params is None:
+            params_tuple = ParameterDialog.get_hessian_parameters()
+
+            if params_tuple is None:
                 return ""
 
-            scaleStart, layers, scaleFactor, detHResponseThresh, particleType, subPixelMult, allowOverlap = params
+            scaleStart, layers, scaleFactor, detHResponseThresh, particleType, subPixelMult, allowOverlap = params_tuple
 
-            # Igor Pro: DoAlert 2, "Would you like to limit the analysis to particles of certain height, volume, or area?"
-            constraints_answer = messagebox.askyesno(
-                "Igor Pro wants to know...",
+            # Ask about constraints
+            constraints_answer = messagebox.askyesnocancel(
+                "Constraints",
                 "Would you like to limit the analysis to particles of certain height, volume, or area?"
             )
 
@@ -123,6 +138,8 @@ def HessianBlobs(im, params=None):
 
         if numPotentialParticles == 0:
             safe_print("No particles detected.")
+            # Still show visualization with no particles
+            create_blob_visualization(im, [], NewDF)
             return NewDF
 
         safe_print(f"Detected {numPotentialParticles} potential particles.")
@@ -144,6 +161,8 @@ def HessianBlobs(im, params=None):
 
         if numFinalParticles == 0:
             safe_print("No final particles after filtering.")
+            # Still show visualization
+            create_blob_visualization(im, [], NewDF)
             return NewDF
 
         # Measure particles
@@ -157,12 +176,63 @@ def HessianBlobs(im, params=None):
         DataManager.save_wave_data(AvgHeights, os.path.join(NewDF, "AvgHeights.npy"))
         DataManager.save_wave_data(COM, os.path.join(NewDF, "COM.npy"))
 
-        safe_print(f"Analysis complete. Results saved to: {NewDF}")
+        safe_print(f"Image analysis complete: {numFinalParticles} particles measured.")
+
+        # CREATE AUTOMATIC VISUALIZATION
+        safe_print("Creating visualization...")
+        create_blob_visualization(im, Info, NewDF)
+
         return NewDF
 
     except Exception as e:
         handle_error("HessianBlobs", e)
-        raise HessianBlobError(f"Failed to execute Hessian blob analysis: {e}")
+        return ""
+
+
+def create_blob_visualization(im, Info, output_folder):
+    """Create automatic visualization of detected blobs - matches Igor Pro output."""
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 10))
+
+        # Display the original image
+        im_display = ax.imshow(im, cmap='gray', aspect='equal')
+
+        # Add detected blobs as circles
+        if Info and len(Info) > 0:
+            for particle in Info:
+                # Extract particle information
+                x_center = particle[1]  # Column position
+                y_center = particle[0]  # Row position
+                radius = particle[2]  # Scale/radius
+
+                # Create circle patch
+                circle = patches.Circle((x_center, y_center), radius,
+                                        fill=False, edgecolor='red', linewidth=2)
+                ax.add_patch(circle)
+
+        # Set labels and title
+        ax.set_xlabel('X (pixels)')
+        ax.set_ylabel('Y (pixels)')
+        particle_count = len(Info) if Info else 0
+        ax.set_title(f'Detected Hessian Blobs - {particle_count} particles', fontsize=14)
+
+        # Add colorbar
+        plt.colorbar(im_display, ax=ax, label='Intensity')
+
+        # Save the figure
+        output_path = os.path.join(output_folder, "detected_blobs.png")
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        safe_print(f"Saved visualization to: {output_path}")
+
+        # Show the figure
+        plt.show()
+
+    except Exception as e:
+        handle_error("create_blob_visualization", e)
 
 
 def BatchHessianBlobs():
@@ -529,3 +599,116 @@ def print_series_analysis_summary(result_folder, heights, volumes, areas):
 
     except Exception as e:
         handle_error("print_series_analysis_summary", e)
+
+
+def HessianBlobsSeries(images, params=None):
+    """
+    Analyzes multiple images using the same Hessian blob parameters.
+
+    Args:
+        images: List of image paths or image arrays
+        params: Optional parameter array
+
+    Returns:
+        str: Path to series folder or empty string on error
+    """
+    try:
+        if not images:
+            safe_print("No images provided for series analysis.")
+            return ""
+
+        # Get parameters once for the entire series
+        if params is None:
+            # Get parameters in main thread before starting analysis
+            params_tuple = ParameterDialog.get_hessian_parameters()
+            if params_tuple is None:
+                return ""
+
+            # Convert to params array format
+            params = list(params_tuple)
+
+            # Ask about constraints
+            constraints_answer = messagebox.askyesnocancel(
+                "Constraints",
+                "Would you like to limit the analysis to particles of certain height, volume, or area?"
+            )
+
+            if constraints_answer:
+                constraints = ParameterDialog.get_constraints_dialog()
+                if constraints is None:
+                    return ""
+                params.extend(constraints)
+            else:
+                # Add default constraints
+                params.extend([-np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf])
+
+        # Create series folder
+        series_name = f"Series__{int(time.time())}"
+        SeriesDF = DataManager.create_igor_folder_structure(series_name, "series")
+        safe_print(f"Created series folder: {SeriesDF}")
+
+        # Store parameters
+        params_array = np.array(params)
+        DataManager.save_wave_data(params_array, os.path.join(SeriesDF, "Parameters.npy"))
+
+        # Process each image
+        AllHeights = []
+        AllVolumes = []
+        AllAreas = []
+        AllAvgHeights = []
+        AllCOM = []
+
+        for idx, image in enumerate(images):
+            safe_print("-------------------------------------------------------")
+            safe_print(
+                f"Analyzing image {idx + 1} of {len(images)}: {os.path.basename(image) if isinstance(image, str) else f'Array {idx}'}")
+            safe_print("-------------------------------------------------------")
+
+            # Load image if it's a path
+            if isinstance(image, str):
+                im = load_image(image)
+                if im is None:
+                    safe_print(f"Failed to load image: {image}")
+                    continue
+            else:
+                im = image
+
+            # Create image-specific folder
+            ImageDF = DataManager.create_igor_folder_structure(f"image_{idx}_Particles", "particles", parent=SeriesDF)
+            safe_print(f"Created image folder: {ImageDF}")
+
+            # Run HessianBlobs with the parameters
+            # Note: We'll handle interactive threshold in main thread within HessianBlobs
+            result = HessianBlobs(im, params)
+
+            if result:
+                # Load results
+                Heights = DataManager.load_wave_data(os.path.join(result, "Heights.npy"))
+                Volumes = DataManager.load_wave_data(os.path.join(result, "Volumes.npy"))
+                Areas = DataManager.load_wave_data(os.path.join(result, "Areas.npy"))
+                AvgHeights = DataManager.load_wave_data(os.path.join(result, "AvgHeights.npy"))
+                COM = DataManager.load_wave_data(os.path.join(result, "COM.npy"))
+
+                if Heights is not None:
+                    AllHeights.extend(Heights)
+                    AllVolumes.extend(Volumes)
+                    AllAreas.extend(Areas)
+                    AllAvgHeights.extend(AvgHeights)
+                    AllCOM.extend(COM)
+
+        # Save aggregated results
+        if AllHeights:
+            DataManager.save_wave_data(np.array(AllHeights), os.path.join(SeriesDF, "AllHeights.npy"))
+            DataManager.save_wave_data(np.array(AllVolumes), os.path.join(SeriesDF, "AllVolumes.npy"))
+            DataManager.save_wave_data(np.array(AllAreas), os.path.join(SeriesDF, "AllAreas.npy"))
+            DataManager.save_wave_data(np.array(AllAvgHeights), os.path.join(SeriesDF, "AllAvgHeights.npy"))
+            DataManager.save_wave_data(np.array(AllCOM), os.path.join(SeriesDF, "AllCOM.npy"))
+
+        numParticles = len(AllHeights)
+        safe_print(f"Series complete. Total particles detected: {numParticles}")
+
+        return SeriesDF
+
+    except Exception as e:
+        handle_error("HessianBlobsSeries", e)
+        return ""

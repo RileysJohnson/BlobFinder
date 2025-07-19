@@ -149,48 +149,56 @@ def BlobDetectors(L, gammaNorm):
 def OtsuThreshold(detH, LG, particleType, maxCurvatureRatio):
     """Uses Otsu's method to automatically define a threshold blob strength - EXACT IGOR PRO ALGORITHM."""
     try:
-        # First identify the maxes
-        MaxesArray = GetMaxes(detH, LG, particleType, maxCurvatureRatio)
-        if len(MaxesArray) == 0:
+        # Igor Pro: Wave Maxes = Maxes(detH,LG,particleType,maxCurvatureRatio)
+        Maxes = GetMaxes(detH, LG, particleType, maxCurvatureRatio)
+        if len(Maxes) == 0:
             safe_print("No maxima found for Otsu threshold calculation.")
             return 0.0
 
-        # Create a histogram of the maxes using Igor Pro's approach
-        # Igor Pro uses 5 bins by default: Histogram/B=5
-        num_bins = 5  # Exact Igor Pro default
-        Hist, bin_edges = np.histogram(MaxesArray, bins=num_bins)
+        # Igor Pro: Duplicate/O Maxes, SS_OTSU_COPY
+        # Igor Pro: Wave Workhorse = SS_OTSU_COPY
+        Workhorse = Maxes.copy()
+
+        # Igor Pro: Histogram/B=5 /Dest=Hist Maxes
+        Hist, bin_edges = np.histogram(Maxes, bins=5)
 
         # Search for the best threshold using Igor Pro's intra-class variance method
         minICV = np.inf
-        bestThresh = 0.0
+        bestThresh = -np.inf
 
-        for i in range(len(bin_edges) - 1):
+        # Igor Pro: For(i=0;i<lim;i+=1)
+        for i in range(len(Hist)):
+            # Igor Pro: xThresh = DimOffset(Hist,0)+i*DimDelta(Hist,0)
             xThresh = bin_edges[i]
 
-            # Igor Pro logic: Multithread Workhorse = SelectNumber(Maxes < xThresh, NaN, Maxes)
-            below_thresh = MaxesArray[MaxesArray < xThresh]
-            # Igor Pro logic: Multithread Workhorse = SelectNumber(Maxes >= xThresh, NaN, Maxes)
-            above_thresh = MaxesArray[MaxesArray >= xThresh]
+            # Igor Pro: Multithread Workhorse = SelectNumber(Maxes < xThresh, NaN, Maxes)
+            below_mask = Maxes < xThresh
+            above_mask = Maxes >= xThresh
 
-            if len(below_thresh) == 0 or len(above_thresh) == 0:
+            below_values = Maxes[below_mask]
+            above_values = Maxes[above_mask]
+
+            if len(below_values) == 0 or len(above_values) == 0:
                 continue
 
-            # Calculate intra-class variance exactly like Igor Pro
             # Igor Pro: ICV = Sum(Hist,-inf,xThresh)*Variance(Workhorse)
-            w1 = len(below_thresh)
-            w2 = len(above_thresh)
+            # Calculate weighted intra-class variance
+            weight_below = np.sum(Hist[:i + 1])
+            weight_above = np.sum(Hist[i + 1:])
 
-            if w1 > 1 and w2 > 1:
-                # Igor Pro uses population variance (ddof=0)
-                var1 = np.var(below_thresh, ddof=0)
-                var2 = np.var(above_thresh, ddof=0)
+            if weight_below > 0 and weight_above > 0:
+                var_below = np.var(below_values)
+                var_above = np.var(above_values)
+
                 # Igor Pro: ICV += Sum(Hist,xThresh,inf)*Variance(Workhorse)
-                ICV = w1 * var1 + w2 * var2
+                ICV = weight_below * var_below + weight_above * var_above
 
                 if ICV < minICV:
                     bestThresh = xThresh
                     minICV = ICV
 
+        # Igor Pro: KillWaves/Z Maxes, Hist, Workhorse
+        # Igor Pro: Return bestThresh
         return bestThresh
 
     except Exception as e:
@@ -201,30 +209,80 @@ def OtsuThreshold(detH, LG, particleType, maxCurvatureRatio):
 def FixBoundaries(detH):
     """Fixes a boundary issue in the blob detectors - EXACT IGOR PRO ALGORITHM."""
     try:
-        limP, limQ = detH.shape[:2]
-        limP -= 1
-        limQ -= 1
+        # Igor Pro: Variable i,limP=DimSize(detH,0)-1,limQ=DimSize(detH,1)-1
+        limP = detH.shape[0] - 1
+        limQ = detH.shape[1] - 1
 
-        # Do the sides first. Corners need extra care.
+        # Igor Pro: Do the sides first. Corners need extra care.
         # Make the edges fade off so that maxima can still be detected.
 
-        # Igor Pro: For(i=1;i<limP;i+=1)
-        for i in range(1, limP):
-            # Left and right edges
-            detH[i, 0, :] = detH[i, 1, :] * 0.5
-            detH[i, limQ, :] = detH[i, limQ - 1, :] * 0.5
+        # Igor Pro: For(i=2;i<=limP-2;i+=1)
+        for i in range(2, limP - 1):
+            # Igor Pro: Multithread detH[i][0][] = detH[i][2][r]/3
+            detH[i, 0, :] = detH[i, 2, :] / 3
+            # Igor Pro: Multithread detH[i][1][] = detH[i][2][r]*2/3
+            detH[i, 1, :] = detH[i, 2, :] * 2 / 3
 
-        # Igor Pro: For(j=1;j<limQ;j+=1)
-        for j in range(1, limQ):
-            # Top and bottom edges
-            detH[0, j, :] = detH[1, j, :] * 0.5
-            detH[limP, j, :] = detH[limP - 1, j, :] * 0.5
+        # Igor Pro: For(i=2;i<=limP-2;i+=1)
+        for i in range(2, limP - 1):
+            # Igor Pro: Multithread detH[i][limQ][] = detH[i][limQ-2][r]/3
+            detH[i, limQ, :] = detH[i, limQ - 2, :] / 3
+            # Igor Pro: Multithread detH[i][limQ-1][] = detH[i][limQ-2][r]*2/3
+            detH[i, limQ - 1, :] = detH[i, limQ - 2, :] * 2 / 3
 
-        # Fix the corners - Igor Pro sets corners to zero
-        detH[0, 0, :] = 0
-        detH[0, limQ, :] = 0
-        detH[limP, 0, :] = 0
-        detH[limP, limQ, :] = 0
+        # Igor Pro: For(i=2;i<=limQ-2;i+=1)
+        for i in range(2, limQ - 1):
+            # Igor Pro: Multithread detH[0][i][] = detH[2][i][r]/3
+            detH[0, i, :] = detH[2, i, :] / 3
+            # Igor Pro: Multithread detH[1][i][] = detH[2][i][r]*2/3
+            detH[1, i, :] = detH[2, i, :] * 2 / 3
+
+        # Igor Pro: For(i=2;i<=limQ-2;i+=1)
+        for i in range(2, limQ - 1):
+            # Igor Pro: Multithread detH[limP][i][] = detH[limP-2][i][r]/3
+            detH[limP, i, :] = detH[limP - 2, i, :] / 3
+            # Igor Pro: Multithread detH[limP-1][i][] = detH[limP-2][i][r]*2/3
+            detH[limP - 1, i, :] = detH[limP - 2, i, :] * 2 / 3
+
+        # Igor Pro: Top Left Corner
+        # Multithread detH[1][1][] = (detH[1][2][r]+detH[2][1][r])/2
+        detH[1, 1, :] = (detH[1, 2, :] + detH[2, 1, :]) / 2
+        # Multithread detH[1][0][] = (detH[1][1][r]+detH[2][0][r])/2
+        detH[1, 0, :] = (detH[1, 1, :] + detH[2, 0, :]) / 2
+        # Multithread detH[0][1][] = (detH[1][1][r]+detH[0][2][r])/2
+        detH[0, 1, :] = (detH[1, 1, :] + detH[0, 2, :]) / 2
+        # Multithread detH[0][0][] = (detH[0][1][r]+detH[1][0][r])/2
+        detH[0, 0, :] = (detH[0, 1, :] + detH[1, 0, :]) / 2
+
+        # Igor Pro: Bottom Right Corner
+        # Multithread detH[limP-1][limQ-1][] = (detH[limP-1][limQ-2][r]+detH[limP-2][limQ-1][r])/2
+        detH[limP - 1, limQ - 1, :] = (detH[limP - 1, limQ - 2, :] + detH[limP - 2, limQ - 1, :]) / 2
+        # Multithread detH[limP-1][limQ][] = (detH[limP-1][limQ-1][r]+detH[limP-2][limQ][r])/2
+        detH[limP - 1, limQ, :] = (detH[limP - 1, limQ - 1, :] + detH[limP - 2, limQ, :]) / 2
+        # Multithread detH[limP][limQ-1][] = (detH[limP-1][limQ-1][r]+detH[limP][limQ-2][r])/2
+        detH[limP, limQ - 1, :] = (detH[limP - 1, limQ - 1, :] + detH[limP, limQ - 2, :]) / 2
+        # Multithread detH[limP][limQ][] = (detH[limP-1][limQ][r]+detH[limP][limQ-1][r])/2
+        detH[limP, limQ, :] = (detH[limP - 1, limQ, :] + detH[limP, limQ - 1, :]) / 2
+
+        # Igor Pro: Top Right Corner
+        # Multithread detH[limP-1][1][] = (detH[limP-1][2][r]+detH[limP-2][1][r])/2
+        detH[limP - 1, 1, :] = (detH[limP - 1, 2, :] + detH[limP - 2, 1, :]) / 2
+        # Multithread detH[limP-1][0][] = (detH[limP-1][1][r]+detH[limP-2][0][r])/2
+        detH[limP - 1, 0, :] = (detH[limP - 1, 1, :] + detH[limP - 2, 0, :]) / 2
+        # Multithread detH[limP][1][] = (detH[limP-1][1][r]+detH[limP][2][r])/2
+        detH[limP, 1, :] = (detH[limP - 1, 1, :] + detH[limP, 2, :]) / 2
+        # Multithread detH[limP][0][] = (detH[limP-1][0][r]+detH[limP][1][r])/2
+        detH[limP, 0, :] = (detH[limP - 1, 0, :] + detH[limP, 1, :]) / 2
+
+        # Igor Pro: Bottom Left Corner
+        # Multithread detH[1][limQ-1][] = (detH[1][limQ-2][r]+detH[2][limQ-1][r])/2
+        detH[1, limQ - 1, :] = (detH[1, limQ - 2, :] + detH[2, limQ - 1, :]) / 2
+        # Multithread detH[1][limQ][] = (detH[1][limQ-1][r]+detH[2][limQ][r])/2
+        detH[1, limQ, :] = (detH[1, limQ - 1, :] + detH[2, limQ, :]) / 2
+        # Multithread detH[0][limQ-1][] = (detH[1][limQ-1][r]+detH[0][limQ-2][r])/2
+        detH[0, limQ - 1, :] = (detH[1, limQ - 1, :] + detH[0, limQ - 2, :]) / 2
+        # Multithread detH[0][limQ][] = (detH[1][limQ][r]+detH[0][limQ-1][r])/2
+        detH[0, limQ, :] = (detH[1, limQ, :] + detH[0, limQ - 1, :]) / 2
 
         return 0
 
@@ -233,79 +291,95 @@ def FixBoundaries(detH):
         return -1
 
 
-def GetMaxes(detH, LG, particleType, maxCurvatureRatio, create_maps=False):
+def GetMaxes(detH, LG, particleType, maxCurvatureRatio, map=None, scaleMap=None):
     """Returns a wave with the values of the local maxes of the determinant of Hessian - EXACT IGOR PRO ALGORITHM."""
     try:
-        limI, limJ, limK = detH.shape
+        # Igor Pro: Make/N=(NumPnts(detH)/26) /O $Name
+        # Igor Pro: Wave Maxes = $Name
         maxes_list = []
 
-        # Create maps if requested (for interactive threshold)
-        if create_maps:
-            SS_MAXMAP = np.zeros((limI, limJ))
-            SS_MAXSCALEMAP = np.zeros((limI, limJ))
+        limI, limJ, limK = detH.shape
 
-        # Igor Pro: For(i=1;i<limI-1;i+=1) For(j=1;j<limJ-1;j+=1) For(k=1;k<limK-1;k+=1)
-        for i in range(1, limI - 1):
-            for j in range(1, limJ - 1):
-                for k in range(1, limK - 1):
+        # Get scale-space parameters (should match ScaleSpaceRepresentation)
+        # Igor Pro uses: SetScale/P z,t0,tFactor,L
+        t0 = 1.0  # Initial scale
+        tFactor = 1.5  # Scale factor between layers
+
+        # Igor Pro: Start with smallest blobs then go to larger blobs
+        # For(k=1;k<limK-1;k+=1)
+        for k in range(1, limK - 1):
+            # For(i=1;i<limI;i+=1) For(j=1;j<limJ;j+=1)
+            for i in range(1, limI - 1):
+                for j in range(1, limJ - 1):
+
                     center_val = detH[i, j, k]
 
-                    # Check if it's a local maximum in 3D neighborhood
+                    # Skip if center value is not positive
+                    if center_val <= 0:
+                        continue
+
+                    # Igor Pro: Is it too edgy?
+                    # If( LG[i][j][k]^2/detH[i][j][k] >= (maxCurvatureRatio+1)^2/maxCurvatureRatio )
+                    edginess = (LG[i, j, k] ** 2) / center_val
+                    threshold = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
+                    if edginess >= threshold:
+                        continue
+
+                    # Igor Pro: Is it the right type of particle?
+                    # If( (particleType==-1 && LG[i][j][k]<0) || (particleType==1 && LG[i][j][k]>0)  )
+                    if particleType == -1 and LG[i, j, k] < 0:
+                        continue
+                    elif particleType == 1 and LG[i, j, k] > 0:
+                        continue
+                    # particleType == 0 means both types are accepted
+
+                    # Igor Pro: There are 26 neighbors in three dimensions.. Have to check if it is a local maximum
+                    # Check strictly greater neighbors (7 neighbors)
                     is_max = True
-                    for di in [-1, 0, 1]:
-                        for dj in [-1, 0, 1]:
-                            for dk in [-1, 0, 1]:
-                                if di == 0 and dj == 0 and dk == 0:
-                                    continue
-                                if detH[i + di, j + dj, k + dk] >= center_val:
-                                    is_max = False
-                                    break
-                            if not is_max:
-                                break
-                        if not is_max:
-                            break
 
-                    if is_max and center_val > 0:
-                        # Igor Pro maxima curvature test
-                        if particleType == 1:  # Positive blobs only
-                            if LG[i, j, k] > 0:
-                                continue
-                        elif particleType == -1:  # Negative blobs only
-                            if LG[i, j, k] < 0:
-                                continue
-                        # particleType == 0 means both positive and negative
+                    # Check the 7 strictly less neighbors
+                    neighbors_strict = [
+                        detH[i - 1, j - 1, k - 1], detH[i - 1, j - 1, k], detH[i - 1, j, k - 1],
+                        detH[i, j - 1, k - 1], detH[i, j, k - 1], detH[i, j - 1, k], detH[i - 1, j, k]
+                    ]
 
-                        # Igor Pro curvature ratio test
-                        # Calculate Hessian eigenvalues for curvature test
-                        Lxx = (detH[i + 1, j, k] - 2 * detH[i, j, k] + detH[i - 1, j, k])
-                        Lyy = (detH[i, j + 1, k] - 2 * detH[i, j, k] + detH[i, j - 1, k])
-                        Lxy = 0.25 * (detH[i + 1, j + 1, k] - detH[i + 1, j - 1, k] - detH[i - 1, j + 1, k] + detH[
-                            i - 1, j - 1, k])
+                    if not (center_val > max(neighbors_strict)):
+                        continue
 
-                        trace = Lxx + Lyy
-                        det = Lxx * Lyy - Lxy * Lxy
+                    # Check the 19 greater or equal neighbors
+                    neighbors_ge = [
+                        detH[i - 1, j - 1, k + 1], detH[i - 1, j, k + 1], detH[i - 1, j + 1, k - 1],
+                        detH[i - 1, j + 1, k], detH[i - 1, j + 1, k + 1], detH[i, j - 1, k + 1],
+                        detH[i, j, k + 1], detH[i, j + 1, k - 1], detH[i, j + 1, k],
+                        detH[i, j + 1, k + 1], detH[i + 1, j - 1, k - 1], detH[i + 1, j - 1, k],
+                        detH[i + 1, j - 1, k + 1], detH[i + 1, j, k - 1], detH[i + 1, j, k],
+                        detH[i + 1, j, k + 1], detH[i + 1, j + 1, k - 1], detH[i + 1, j + 1, k],
+                        detH[i + 1, j + 1, k + 1]
+                    ]
 
-                        if det != 0:
-                            curvature_ratio = (trace * trace) / det
-                            if curvature_ratio < maxCurvatureRatio:
-                                maxes_list.append(center_val)
+                    if not (center_val >= max(neighbors_ge)):
+                        continue
 
-                                if create_maps:
-                                    SS_MAXMAP[i, j] = center_val
-                                    # Scale from layer index - approximate conversion
-                                    SS_MAXSCALEMAP[i, j] = np.sqrt(2 * (1.0 * (1.5 ** k)))
+                    # Igor Pro: Maxes[cnt] = detH[i][j][k]
+                    maxes_list.append(center_val)
 
-        if create_maps:
-            return SS_MAXMAP, SS_MAXSCALEMAP
-        else:
-            return np.array(maxes_list)
+                    # Igor Pro: If( !ParamIsDefault(map) ) map[i][j] = max(map[i][j],detH[i][j][k])
+                    if map is not None:
+                        map[i, j] = max(map[i, j], center_val)
+
+                    # Igor Pro: If( !ParamIsDefault(scaleMap) ) scaleMap[i][j] = DimOffset(detH,2)*(DimDelta(detH,2)^k)
+                    if scaleMap is not None:
+                        # Igor Pro scale calculation: t0 * tFactor^k
+                        # This gives the scale in scale-space units
+                        scaleMap[i, j] = t0 * (tFactor ** k)
+
+        # Igor Pro: DeletePoints cnt,NumPnts(detH),Maxes
+        # Igor Pro: Return Maxes
+        return np.array(maxes_list)
 
     except Exception as e:
         handle_error("GetMaxes", e)
-        if create_maps:
-            return None
-        else:
-            return np.array([])
+        return np.array([])
 
 
 def FindHessianBlobs(im, detH, LG, detHResponseThresh, particleType, maxCurvatureRatio):
