@@ -1,236 +1,281 @@
+"""
+Scale-Space Functions
+Handles scale-space representation and blob detector computations
+Direct port from Igor Pro code maintaining same variable names and structure
+"""
+
 import numpy as np
 from scipy import ndimage
-from scipy.fft import fft2, ifft2, fftfreq
-from utilities import CoordinateSystem
+from scipy.fft import fft2, ifft2
+from igor_compatibility import *
+from file_io import data_browser
 
 
-def scale_space_representation(im, layers, t0, t_factor, coord_system=None):
+def ScaleSpaceRepresentation(im, layers, t0, tFactor):
     """
-    Computes the discrete scale-space representation L of an image
-
-    Parameters:
-    im: The image to compute L from
-    layers: The number of layers of L
-    t0: The scale of the first layer of L, provided in pixel units
-    t_factor: The scaling factor for the scale between layers of L
-    coord_system: Optional coordinate system for the image
-
-    Returns:
-    L: Scale-space representation
-    scale_coords: Coordinate system for scale dimension
+    Computes the discrete scale-space representation L of an image.
+        im : The image to compute L from.
+        layers : The number of layers of L.
+        t0 : The scale of the first layer of L, provided in pixel units.
+        tFactor : The scaling factor for the scale between layers of L.
     """
-    if coord_system is None:
-        coord_system = CoordinateSystem(im.shape)
+    # Convert t0 to image units.
+    t0 = (t0 * DimDelta(im, 0)) ** 2
 
-    # Convert t0 to image units - matching Igor Pro exactly
-    t0 = (t0 * coord_system.x_delta) ** 2
+    # Go to Fourier space.
+    im_fft = fft2(im.data)
 
-    # Go to Fourier space
-    im_fft = fft2(im)
-
-    # Get frequency coordinates
-    freq_x = fftfreq(im.shape[0], d=coord_system.x_delta)
-    freq_y = fftfreq(im.shape[1], d=coord_system.y_delta)
-    fx, fy = np.meshgrid(freq_y, freq_x)
-
-    # Make the layers
-    L = np.zeros((*im.shape, layers))
-    scales = []
+    # Make the layers of the scale-space representation and convolve in Fourier space.
+    family = []
+    names = []
 
     for i in range(layers):
-        scale = t0 * (t_factor ** i)
-        scales.append(scale)
+        # Create frequency coordinates
+        height, width = im.data.shape
+        u = np.fft.fftfreq(height, DimDelta(im, 0))
+        v = np.fft.fftfreq(width, DimDelta(im, 1))
+        U, V = np.meshgrid(v, u)
 
-        # Gaussian in Fourier space - matching Igor Pro formula
-        gaussian_fft = np.exp(-(fx ** 2 + fy ** 2) * np.pi ** 2 * 2 * scale)
+        # Create Gaussian kernel in frequency domain
+        scale = t0 * (tFactor ** i)
+        kernel = np.exp(-(U ** 2 + V ** 2) * np.pi ** 2 * 2 * scale)
 
-        # Convolve and store
-        layer_fft = im_fft * gaussian_fft
-        L[:, :, i] = np.real(ifft2(layer_fft))
+        # Apply kernel
+        layer_fft = im_fft * kernel
+        layer_data = np.real(ifft2(layer_fft))
 
-    # Create scale coordinate system matching Igor Pro SetScale
-    scale_coords = {
-        'start': t0,
-        'delta': t_factor,
-        'scales': scales
-    }
+        layer_wave = Wave(layer_data, f"L_{i}")
+        layer_wave.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
+        layer_wave.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
 
-    return L, scale_coords
+        family.append(layer_wave)
+        names.append(f"L_{i}")
+
+    # Concatenate layers of the scale-space representation into a 3D wave.
+    L_data = np.stack([layer.data for layer in family], axis=2)
+    L = Wave(L_data, f"{im.name}_L")
+    L.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
+    L.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+    L.SetScale('z', t0, tFactor)
+
+    return L
 
 
-def blob_detectors(L, gamma_norm, coord_system=None):
+def BlobDetectors(L, gammaNorm):
     """
-    Computes blob detectors: determinant of Hessian and Laplacian of Gaussian
-
-    Parameters:
-    L: Scale-space representation
-    gamma_norm: Gamma normalization factor
-    coord_system: Optional coordinate system
-
-    Returns:
-    detH: Determinant of Hessian
-    LapG: Laplacian of Gaussian
+    Computes the two blob detectors, the determinant of the Hessian and the Laplacian of Gaussian.
+        L : The scale-space representation of the image.
+        gammaNorm : The gamma normalization factor, see Lindeberg 1998. Should be set to 1 in most blob detection cases.
     """
-    if coord_system is None:
-        coord_system = CoordinateSystem(L.shape[:2])
+    # Make convolution kernels for calculating central difference derivatives.
+    LxxKernel = Wave(np.array([
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [-1 / 12, 16 / 12, -30 / 12, 16 / 12, -1 / 12],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+    ]), "LxxKernel")
 
-    # Define convolution kernels for derivatives - exact Igor Pro kernels
-    # Using 5-point stencil for accuracy
-    lxx_kernel = np.array([[-1 / 12, 16 / 12, -30 / 12, 16 / 12, -1 / 12]]).reshape(5, 1)
-    lyy_kernel = lxx_kernel.T
+    LyyKernel = Wave(np.array([
+        [0, 0, -1 / 12, 0, 0],
+        [0, 0, 16 / 12, 0, 0],
+        [0, 0, -30 / 12, 0, 0],
+        [0, 0, 16 / 12, 0, 0],
+        [0, 0, -1 / 12, 0, 0]
+    ]), "LyyKernel")
 
-    # For mixed derivative
-    lxy_kernel = np.array([
+    LxyKernel = Wave(np.array([
         [-1 / 144, 1 / 18, 0, -1 / 18, 1 / 144],
         [1 / 18, -4 / 9, 0, 4 / 9, -1 / 18],
         [0, 0, 0, 0, 0],
         [-1 / 18, 4 / 9, 0, -4 / 9, 1 / 18],
         [1 / 144, -1 / 18, 0, 1 / 18, -1 / 144]
-    ])
+    ]), "LxyKernel")
 
-    # Compute derivatives
-    Lxx = np.zeros_like(L)
-    Lyy = np.zeros_like(L)
-    Lxy = np.zeros_like(L)
+    # Compute Lxx and Lyy. (Second partial derivatives of L).
+    Lxx_data = np.zeros_like(L.data)
+    Lyy_data = np.zeros_like(L.data)
 
-    for i in range(L.shape[2]):
-        Lxx[:, :, i] = ndimage.convolve(L[:, :, i], lxx_kernel, mode='constant')
-        Lyy[:, :, i] = ndimage.convolve(L[:, :, i], lyy_kernel, mode='constant')
-        Lxy[:, :, i] = ndimage.convolve(L[:, :, i], lxy_kernel, mode='constant')
+    for k in range(L.data.shape[2]):
+        Lxx_data[:, :, k] = ndimage.convolve(L.data[:, :, k], LxxKernel.data, mode='constant')
+        Lyy_data[:, :, k] = ndimage.convolve(L.data[:, :, k], LyyKernel.data, mode='constant')
 
-    # Compute Laplacian of Gaussian
-    LapG = Lxx + Lyy
+    Lxx = Wave(Lxx_data, "Lxx")
+    Lyy = Wave(Lyy_data, "Lyy")
 
-    # Get scale information from L's third dimension
-    t0 = coord_system.x_delta ** 2  # Initial scale
-    t_factor = 1.5  # Default, should be passed in
+    # Compute the Laplacian of Gaussian.
+    LapG_data = Lxx_data + Lyy_data
+    LapG = Wave(LapG_data, "LapG")
 
-    # Gamma normalize and account for pixel spacing - matching Igor Pro exactly
-    for i in range(L.shape[2]):
-        scale = t0 * (t_factor ** i)
-        LapG[:, :, i] *= (scale ** gamma_norm) / (coord_system.x_delta * coord_system.y_delta)
+    # Set the image scale.
+    LapG.SetScale('x', DimOffset(L, 0), DimDelta(L, 0))
+    LapG.SetScale('y', DimOffset(L, 1), DimDelta(L, 1))
+    LapG.SetScale('z', DimOffset(L, 2), DimDelta(L, 2))
 
-    # Fix boundaries
-    fix_boundaries(LapG)
+    # Gamma normalize and account for pixel spacing.
+    for k in range(LapG.data.shape[2]):
+        scale_factor = (DimOffset(L, 2) * (DimDelta(L, 2) ** k)) ** gammaNorm
+        pixel_factor = DimDelta(L, 0) * DimDelta(L, 1)
+        LapG.data[:, :, k] *= scale_factor / pixel_factor
 
-    # Compute determinant of Hessian
-    detH = Lxx * Lyy - Lxy ** 2
+    # Fix errors on the boundary of the image.
+    FixBoundaries(LapG)
 
-    # Gamma normalize - matching Igor Pro exactly
-    for i in range(L.shape[2]):
-        scale = t0 * (t_factor ** i)
-        detH[:, :, i] *= (scale ** (2 * gamma_norm)) / ((coord_system.x_delta * coord_system.y_delta) ** 2)
+    # Compute the determinant of the Hessian.
+    Lxy_data = np.zeros_like(L.data)
+    for k in range(L.data.shape[2]):
+        Lxy_data[:, :, k] = ndimage.convolve(L.data[:, :, k], LxyKernel.data, mode='constant')
 
-    # Fix boundaries
-    fix_boundaries(detH)
+    detH_data = Lxx_data * Lyy_data - Lxy_data ** 2
+    detH = Wave(detH_data.astype(np.float32), "detH")
 
-    return detH.astype(np.float32), LapG.astype(np.float32)
+    # Set the scaling.
+    detH.SetScale('x', DimOffset(L, 0), DimDelta(L, 0))
+    detH.SetScale('y', DimOffset(L, 1), DimDelta(L, 1))
+    detH.SetScale('z', DimOffset(L, 2), DimDelta(L, 2))
+
+    # Gamma normalize and account for pixel spacing.
+    for k in range(detH.data.shape[2]):
+        scale_factor = (DimOffset(L, 2) * (DimDelta(L, 2) ** k)) ** (2 * gammaNorm)
+        pixel_factor = (DimDelta(L, 0) * DimDelta(L, 1)) ** 2
+        detH.data[:, :, k] *= scale_factor / pixel_factor
+
+    # Fix the boundary issues again.
+    FixBoundaries(detH)
+
+    # Store results in data browser (simulating Igor's global storage)
+    current_folder = data_browser  # Simplified
+    current_folder.add_wave(LapG, "LapG")
+    current_folder.add_wave(detH, "detH")
+
+    return 0
 
 
-def fix_boundaries(arr):
-    """Fix boundary issues from convolution - exact Igor Pro implementation"""
-    # Handle edges
-    limP, limQ = arr.shape[0] - 1, arr.shape[1] - 1
+def FixBoundaries(detH):
+    """
+    Fixes a boundary issue in the blob detectors. Arises from trying to measure derivatives on the boundary.
+        detH : The determinant of Hessian blob detector, but also works for the Laplacian of Gaussian.
+    """
+    limP = detH.data.shape[0] - 1
+    limQ = detH.data.shape[1] - 1
 
-    # Sides - exact Igor Pro logic
+    # Do the sides first. Corners need extra care.
+    # Make the edges fade off so that maxima can still be detected.
     for i in range(2, limP - 1):
-        arr[i, 0, :] = arr[i, 2, :] / 3
-        arr[i, 1, :] = arr[i, 2, :] * 2 / 3
-        arr[i, limQ, :] = arr[i, limQ - 2, :] / 3
-        arr[i, limQ - 1, :] = arr[i, limQ - 2, :] * 2 / 3
+        detH.data[i, 0, :] = detH.data[i, 2, :] / 3
+        detH.data[i, 1, :] = detH.data[i, 2, :] * 2 / 3
 
-    for j in range(2, limQ - 1):
-        arr[0, j, :] = arr[2, j, :] / 3
-        arr[1, j, :] = arr[2, j, :] * 2 / 3
-        arr[limP, j, :] = arr[limP - 2, j, :] / 3
-        arr[limP - 1, j, :] = arr[limP - 2, j, :] * 2 / 3
+    for i in range(2, limP - 1):
+        detH.data[i, limQ, :] = detH.data[i, limQ - 2, :] / 3
+        detH.data[i, limQ - 1, :] = detH.data[i, limQ - 2, :] * 2 / 3
 
-    # Corners - exact Igor Pro implementation
-    # Top left
-    arr[1, 1, :] = (arr[1, 2, :] + arr[2, 1, :]) / 2
-    arr[1, 0, :] = (arr[1, 1, :] + arr[2, 0, :]) / 2
-    arr[0, 1, :] = (arr[1, 1, :] + arr[0, 2, :]) / 2
-    arr[0, 0, :] = (arr[0, 1, :] + arr[1, 0, :]) / 2
+    for i in range(2, limQ - 1):
+        detH.data[0, i, :] = detH.data[2, i, :] / 3
+        detH.data[1, i, :] = detH.data[2, i, :] * 2 / 3
 
-    # Bottom right
-    arr[limP - 1, limQ - 1, :] = (arr[limP - 1, limQ - 2, :] + arr[limP - 2, limQ - 1, :]) / 2
-    arr[limP - 1, limQ, :] = (arr[limP - 1, limQ - 1, :] + arr[limP - 2, limQ, :]) / 2
-    arr[limP, limQ - 1, :] = (arr[limP - 1, limQ - 1, :] + arr[limP, limQ - 2, :]) / 2
-    arr[limP, limQ, :] = (arr[limP - 1, limQ, :] + arr[limP, limQ - 1, :]) / 2
+    for i in range(2, limQ - 1):
+        detH.data[limP, i, :] = detH.data[limP - 2, i, :] / 3
+        detH.data[limP - 1, i, :] = detH.data[limP - 2, i, :] * 2 / 3
 
-    # Top right
-    arr[limP - 1, 1, :] = (arr[limP - 1, 2, :] + arr[limP - 2, 1, :]) / 2
-    arr[limP - 1, 0, :] = (arr[limP - 1, 1, :] + arr[limP - 2, 0, :]) / 2
-    arr[limP, 1, :] = (arr[limP - 1, 1, :] + arr[limP, 2, :]) / 2
-    arr[limP, 0, :] = (arr[limP - 1, 0, :] + arr[limP, 1, :]) / 2
+    # Top Left Corner
+    detH.data[1, 1, :] = (detH.data[1, 2, :] + detH.data[2, 1, :]) / 2
+    detH.data[1, 0, :] = (detH.data[1, 1, :] + detH.data[2, 0, :]) / 2
+    detH.data[0, 1, :] = (detH.data[1, 1, :] + detH.data[0, 2, :]) / 2
+    detH.data[0, 0, :] = (detH.data[0, 1, :] + detH.data[1, 0, :]) / 2
 
-    # Bottom left
-    arr[1, limQ - 1, :] = (arr[1, limQ - 2, :] + arr[2, limQ - 1, :]) / 2
-    arr[1, limQ, :] = (arr[1, limQ - 1, :] + arr[2, limQ, :]) / 2
-    arr[0, limQ - 1, :] = (arr[1, limQ - 1, :] + arr[0, limQ - 2, :]) / 2
-    arr[0, limQ, :] = (arr[1, limQ, :] + arr[0, limQ - 1, :]) / 2
+    # Bottom Right Corner
+    detH.data[limP - 1, limQ - 1, :] = (detH.data[limP - 1, limQ - 2, :] + detH.data[limP - 2, limQ - 1, :]) / 2
+    detH.data[limP - 1, limQ, :] = (detH.data[limP - 1, limQ - 1, :] + detH.data[limP - 2, limQ, :]) / 2
+    detH.data[limP, limQ - 1, :] = (detH.data[limP - 1, limQ - 1, :] + detH.data[limP, limQ - 2, :]) / 2
+    detH.data[limP, limQ, :] = (detH.data[limP - 1, limQ, :] + detH.data[limP, limQ - 1, :]) / 2
+
+    # Top Right Corner
+    detH.data[limP - 1, 1, :] = (detH.data[limP - 1, 2, :] + detH.data[limP - 2, 1, :]) / 2
+    detH.data[limP - 1, 0, :] = (detH.data[limP - 1, 1, :] + detH.data[limP - 2, 0, :]) / 2
+    detH.data[limP, 1, :] = (detH.data[limP - 1, 1, :] + detH.data[limP, 2, :]) / 2
+    detH.data[limP, 0, :] = (detH.data[limP - 1, 0, :] + detH.data[limP, 1, :]) / 2
+
+    # Bottom Left Corner
+    detH.data[1, limQ - 1, :] = (detH.data[1, limQ - 2, :] + detH.data[2, limQ - 1, :]) / 2
+    detH.data[1, limQ, :] = (detH.data[1, limQ - 1, :] + detH.data[2, limQ, :]) / 2
+    detH.data[0, limQ - 1, :] = (detH.data[1, limQ - 1, :] + detH.data[0, limQ - 2, :]) / 2
+    detH.data[0, limQ, :] = (detH.data[1, limQ, :] + detH.data[0, limQ - 1, :]) / 2
+
+    return 0
 
 
-def find_scale_space_maxima(detH, LG, particleType, maxCurvatureRatio):
+def OtsuThreshold(detH, LG, particleType, maxCurvatureRatio):
     """
-    Find local maxima in scale space - matching Igor Pro Maxes function
-
-    Returns:
-    maxes: Array of maximum values
-    map_data: 2D map of maximum detH values
-    scale_map: 2D map of scales at maxima
+    Uses Otsu's method to automatically define a threshold blob strength.
+        detH : The determinant of Hessian blob detector.
+        LG : The Laplacian of Gaussian blob detector.
+        particleType : If 0, only maximal blob responses are considered. If 1, will consider positive and negative extrema.
+        maxCurvatureRatio : Maximum curvature ratio parameter.
     """
-    maxes = []
-    map_data = np.full(detH.shape[:2], -1, dtype=np.float32)
-    scale_map = np.zeros(detH.shape[:2])
+    # First identify the maxes
+    maxes = Maxes(detH, LG, particleType, maxCurvatureRatio)
+    workhorse = Wave(maxes.data.copy(), "SS_OTSU_COPY")
 
-    limI, limJ, limK = detH.shape[0] - 1, detH.shape[1] - 1, detH.shape[2] - 1
+    # Create a histogram using of the maxes
+    hist, bin_edges = np.histogram(maxes.data, bins=50)
+    hist_wave = Wave(hist, "Hist")
 
-    # Start with smallest blobs then go to larger blobs - matching Igor Pro
-    for k in range(1, limK - 1):
+    # Search for the best threshold
+    min_ICV = np.inf
+    best_thresh = -np.inf
+
+    for i, bin_edge in enumerate(bin_edges[:-1]):
+        x_thresh = bin_edge
+
+        # Calculate intra-class variance
+        mask_below = maxes.data < x_thresh
+        mask_above = maxes.data >= x_thresh
+
+        if np.sum(mask_below) == 0 or np.sum(mask_above) == 0:
+            continue
+
+        var_below = np.var(maxes.data[mask_below]) if np.sum(mask_below) > 1 else 0
+        var_above = np.var(maxes.data[mask_above]) if np.sum(mask_above) > 1 else 0
+
+        ICV = np.sum(hist[:i + 1]) * var_below + np.sum(hist[i + 1:]) * var_above
+
+        if ICV < min_ICV:
+            best_thresh = x_thresh
+            min_ICV = ICV
+
+    return best_thresh
+
+
+def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=None):
+    """
+    Returns a wave with the values of the local maxes of the determinant of Hessian.
+    """
+    name = f"{detH.name}_MaxValues"
+    maxes = Wave(np.zeros(detH.data.size // 26), name)
+
+    limI = detH.data.shape[0] - 1
+    limJ = detH.data.shape[1] - 1
+    limK = detH.data.shape[2] - 1
+    cnt = 0
+
+    # Start with smallest blobs then go to larger blobs
+    for k in range(1, limK):
         for i in range(1, limI):
             for j in range(1, limJ):
-                # Check curvature ratio
-                if LG[i, j, k] ** 2 / detH[i, j, k] >= (maxCurvatureRatio + 1) ** 2 / maxCurvatureRatio:
+
+                # Is it too edgy?
+                if LG.data[i, j, k] ** 2 / detH.data[i, j, k] >= (maxCurvatureRatio + 1) ** 2 / maxCurvatureRatio:
                     continue
 
-                # Check particle type
-                if particleType == -1 and LG[i, j, k] < 0:
-                    continue
-                elif particleType == 1 and LG[i, j, k] > 0:
+                # Is it the right type of particle?
+                if (particleType == -1 and LG.data[i, j, k] < 0) or (particleType == 1 and LG.data[i, j, k] > 0):
                     continue
 
-                # Check if local maximum - exact Igor Pro logic
-                center_val = detH[i, j, k]
+                # Check if it's a local maximum in 3D neighborhood
+                current_val = detH.data[i, j, k]
 
                 # Check 26 neighbors
-                is_max = True
-
-                # Check strictly greater for same scale
-                if k > 0:
-                    strictly_greater = max(
-                        detH[i - 1, j - 1, k - 1] if i > 0 and j > 0 and k > 0 else -np.inf,
-                        detH[i - 1, j - 1, k] if i > 0 and j > 0 else -np.inf,
-                        detH[i - 1, j, k - 1] if i > 0 and k > 0 else -np.inf,
-                        detH[i, j - 1, k - 1] if j > 0 and k > 0 else -np.inf,
-                        detH[i, j, k - 1] if k > 0 else -np.inf,
-                        detH[i, j - 1, k] if j > 0 else -np.inf,
-                        detH[i - 1, j, k] if i > 0 else -np.inf
-                    )
-                else:
-                    strictly_greater = max(
-                        detH[i - 1, j - 1, k] if i > 0 and j > 0 else -np.inf,
-                        detH[i, j - 1, k] if j > 0 else -np.inf,
-                        detH[i - 1, j, k] if i > 0 else -np.inf
-                    )
-
-                if not (center_val > strictly_greater):
-                    continue
-
-                # Check greater or equal for other scales
-                greater_or_equal = -np.inf
-
-                # Check all 26 neighbors
+                is_maximum = True
                 for di in [-1, 0, 1]:
                     for dj in [-1, 0, 1]:
                         for dk in [-1, 0, 1]:
@@ -238,60 +283,47 @@ def find_scale_space_maxima(detH, LG, particleType, maxCurvatureRatio):
                                 continue
 
                             ni, nj, nk = i + di, j + dj, k + dk
-
                             if 0 <= ni <= limI and 0 <= nj <= limJ and 0 <= nk <= limK:
-                                if dk == 0:  # Same scale - must be strictly greater
-                                    if detH[ni, nj, nk] >= center_val:
-                                        is_max = False
-                                        break
-                                else:  # Different scale - can be equal
-                                    if detH[ni, nj, nk] > center_val:
-                                        is_max = False
-                                        break
-                        if not is_max:
+                                if detH.data[ni, nj, nk] >= current_val:
+                                    is_maximum = False
+                                    break
+                        if not is_maximum:
                             break
-                    if not is_max:
+                    if not is_maximum:
                         break
 
-                if is_max:
-                    maxes.append(center_val)
-                    if center_val > map_data[i, j]:
-                        map_data[i, j] = center_val
-                        scale_map[i, j] = k  # Store scale index
+                if not is_maximum:
+                    continue
 
-    return np.array(maxes), map_data, scale_map
+                if cnt < len(maxes.data):
+                    maxes.data[cnt] = current_val
+                    cnt += 1
+
+                if map_wave is not None:
+                    map_wave.data[i, j] = max(map_wave.data[i, j], current_val)
+
+                if scaleMap is not None:
+                    scaleMap.data[i, j] = DimOffset(detH, 2) * (DimDelta(detH, 2) ** k)
+
+    # Trim the maxes array
+    if cnt < len(maxes.data):
+        maxes.data = maxes.data[:cnt]
+
+    return maxes
 
 
-def otsu_threshold(detH, LG, particleType, maxCurvatureRatio):
+def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     """
-    Use Otsu's method to find optimal threshold - exact Igor Pro implementation
+    Lets the user interactively choose a blob strength for the determinant of Hessian.
+    This function would typically show a GUI - here we'll return a default value
     """
-    # Get maxima
-    maxes, _, _ = find_scale_space_maxima(detH, LG, particleType, maxCurvatureRatio)
+    # First identify the maxes
+    maxes = Maxes(detH, LG, particleType, maxCurvatureRatio)
+    maxes.data = np.sqrt(maxes.data)  # Put it into image units
 
-    if len(maxes) == 0:
-        return 0
-
-    # Create histogram
-    hist, bin_edges = np.histogram(maxes, bins=50)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    # Find optimal threshold using Otsu's method
-    best_thresh = -np.inf
-    min_icv = np.inf
-
-    for i in range(len(hist)):
-        x_thresh = bin_edges[i]
-
-        # Calculate intra-class variance
-        below = maxes[maxes < x_thresh]
-        above = maxes[maxes >= x_thresh]
-
-        if len(below) > 0 and len(above) > 0:
-            icv = len(below) * np.var(below) + len(above) * np.var(above)
-
-            if icv < min_icv:
-                min_icv = icv
-                best_thresh = x_thresh
-
-    return best_thresh
+    # For now, return a default threshold (half of maximum)
+    # In a full implementation, this would show an interactive GUI
+    if len(maxes.data) > 0:
+        return np.max(maxes.data) / 2
+    else:
+        return 0.0

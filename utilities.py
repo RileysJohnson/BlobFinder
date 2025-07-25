@@ -1,424 +1,403 @@
+"""
+Utilities Module
+Contains various utility functions used throughout the blob detection algorithm
+Direct port from Igor Pro code maintaining same variable names and structure
+"""
+
 import numpy as np
+from igor_compatibility import *
+from file_io import *
+from particle_measurements import *
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
-import os
-from datetime import datetime
-import json
+import tkinter as tk
+from tkinter import messagebox
 
 
-class WaveNote:
-    """Class to handle wave note functionality similar to Igor Pro"""
-
-    def __init__(self):
-        self.notes = {}
-
-    def add_note(self, key, value):
-        """Add a note entry"""
-        self.notes[key] = value
-
-    def get_note(self, key):
-        """Get a note entry"""
-        return self.notes.get(key, None)
-
-    def to_string(self):
-        """Convert notes to string format similar to Igor Pro"""
-        note_str = ""
-        for key, value in self.notes.items():
-            note_str += f"{key}:{value}\n"
-        return note_str
-
-    def from_string(self, note_str):
-        """Parse notes from string format"""
-        self.notes = {}
-        lines = note_str.strip().split('\n')
-        for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
-                self.notes[key.strip()] = value.strip()
-
-    def to_dict(self):
-        """Convert to dictionary"""
-        return self.notes.copy()
-
-
-class DataFolder:
-    """Class to handle Igor Pro-like data folder structure"""
-
-    def __init__(self, base_path, folder_name):
-        self.base_path = base_path
-        self.folder_name = folder_name
-        self.full_path = os.path.join(base_path, folder_name)
-        os.makedirs(self.full_path, exist_ok=True)
-        self.waves = {}
-        self.subfolders = {}
-
-    def create_subfolder(self, name):
-        """Create a subfolder"""
-        subfolder = DataFolder(self.full_path, name)
-        self.subfolders[name] = subfolder
-        return subfolder
-
-    def save_wave(self, name, data, note=None):
-        """Save a wave (numpy array) with optional note"""
-        file_path = os.path.join(self.full_path, f"{name}.npy")
-        np.save(file_path, data)
-
-        if note:
-            note_path = os.path.join(self.full_path, f"{name}_note.json")
-            with open(note_path, 'w') as f:
-                json.dump(note.to_dict() if isinstance(note, WaveNote) else note, f, indent=2)
-
-        self.waves[name] = data
-
-    def load_wave(self, name):
-        """Load a wave and its note"""
-        file_path = os.path.join(self.full_path, f"{name}.npy")
-        if os.path.exists(file_path):
-            data = np.load(file_path)
-
-            # Try to load note
-            note_path = os.path.join(self.full_path, f"{name}_note.json")
-            note = None
-            if os.path.exists(note_path):
-                with open(note_path, 'r') as f:
-                    note_dict = json.load(f)
-                    note = WaveNote()
-                    note.notes = note_dict
-
-            return data, note
-        return None, None
-
-    def get_path(self):
-        """Get full path of this folder"""
-        return self.full_path
-
-
-class CoordinateSystem:
-    """Handle coordinate transformations similar to Igor Pro's SetScale"""
-
-    def __init__(self, shape, x_start=0, x_delta=1, y_start=0, y_delta=1):
-        self.shape = shape
-        self.x_start = x_start
-        self.x_delta = x_delta
-        self.y_start = y_start
-        self.y_delta = y_delta
-
-    def index_to_scale(self, p, q):
-        """Convert pixel indices to scaled coordinates"""
-        x = self.x_start + p * self.x_delta
-        y = self.y_start + q * self.y_delta
-        return x, y
-
-    def scale_to_index(self, x, y):
-        """Convert scaled coordinates to pixel indices"""
-        p = int((x - self.x_start) / self.x_delta)
-        q = int((y - self.y_start) / self.y_delta)
-        return p, q
-
-    def get_extent(self):
-        """Get extent for matplotlib imshow"""
-        return [self.x_start,
-                self.x_start + self.shape[1] * self.x_delta,
-                self.y_start,
-                self.y_start + self.shape[0] * self.y_delta]
-
-
-def interactive_threshold(im, detH, LG, particleType, maxCurvatureRatio):
+def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, info,
+                     particleType, maxCurvatureRatio):
     """
-    Interactive threshold selection similar to Igor Pro's InteractiveThreshold
+    The map and info must be fed into the function since Igor doesn't return multiple objects..
+    ParticleType is -1 for negative particles only, 1 for positive only, 0 for both
+    """
+    # Square the minResponse, since the parameter is provided as the square root
+    # of the actual minimum detH response so that it is in normal image units
+    minResponse = detHResponseThresh ** 2
 
-    Returns:
-    float: Selected threshold value
+    # mapNum: Map identifying particle numbers
+    mapNum.data = np.full(detH.data.shape, -1)
+    mapNum.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
+    mapNum.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+
+    # mapLG: Map identifying the value of the LoG at the defined scale
+    mapDetH.data = np.zeros(detH.data.shape)
+    mapDetH.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
+    mapDetH.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+
+    # mapMax: Map identifying the value of the maximum pixel in the particle
+    mapMax.data = np.zeros(detH.data.shape)
+    mapMax.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
+    mapMax.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+
+    # Maintain an info wave with particle boundaries and info
+    max_particles = im.data.shape[0] * im.data.shape[1] * detH.data.shape[2] // 27
+    info.data = np.zeros((max_particles, 15))
+
+    # Make a bounding box wave for scanfill
+    box = np.zeros(4)
+
+    limI = detH.data.shape[0] - 1
+    limJ = detH.data.shape[1] - 1
+    limK = detH.data.shape[2] - 1
+    cnt = 0
+
+    # Start with smallest blobs then go to larger blobs
+    for k in range(1, limK):
+        for i in range(1, limI):
+            for j in range(1, limJ):
+
+                # Does it hit the threshold?
+                if detH.data[i, j, k] < minResponse:
+                    continue
+
+                # Is it too edgy?
+                if LG.data[i, j, k] ** 2 / detH.data[i, j, k] >= (maxCurvatureRatio + 1) ** 2 / maxCurvatureRatio:
+                    continue
+
+                # Is there a particle there already?
+                if mapNum.data[i, j, k] > -1 and detH.data[i, j, k] <= info.data[int(mapNum.data[i, j, k]), 3]:
+                    continue
+
+                # Is it the right type of particle?
+                if (particleType == -1 and LG.data[i, j, k] < 0) or (particleType == 1 and LG.data[i, j, k] > 0):
+                    continue
+
+                # Check if it's a local maximum in 3D
+                is_maximum = True
+                current_val = detH.data[i, j, k]
+
+                # Check strictly greater neighbors (scale below)
+                if k > 0:
+                    neighbors = [
+                        detH.data[i - 1, j - 1, k - 1], detH.data[i - 1, j - 1, k], detH.data[i - 1, j, k - 1],
+                        detH.data[i, j - 1, k - 1], detH.data[i, j, k - 1], detH.data[i, j - 1, k],
+                        detH.data[i - 1, j, k]
+                    ]
+                    strictly_greater = max(neighbors)
+                else:
+                    strictly_greater = max(detH.data[i - 1, j - 1, k], detH.data[i, j - 1, k], detH.data[i - 1, j, k])
+
+                if not (current_val > strictly_greater):
+                    continue
+
+                # Check greater or equal neighbors (scale above and same scale)
+                greater_or_equal = -np.inf
+
+                # Same scale and above scale neighbors
+                for di in [-1, 0, 1]:
+                    for dj in [-1, 0, 1]:
+                        for dk in [0, 1] if k < limK else [0]:
+                            if di == 0 and dj == 0 and dk == 0:
+                                continue
+                            ni, nj, nk = i + di, j + dj, k + dk
+                            if 0 <= ni <= limI and 0 <= nj <= limJ and 0 <= nk <= limK:
+                                greater_or_equal = max(greater_or_equal, detH.data[ni, nj, nk])
+
+                if not (current_val >= greater_or_equal):
+                    continue
+
+                # It's a local max, is it overlapped and bigger than another one already?
+                if mapNum.data[i, j, k] > -1:
+                    info.data[int(mapNum.data[i, j, k]), 0] = i
+                    info.data[int(mapNum.data[i, j, k]), 1] = j
+                    info.data[int(mapNum.data[i, j, k]), 3] = current_val
+                    continue
+
+                # It's a local max, proceed to fill out the feature.
+                numPixels = ScanlineFill8_LG(detH, mapMax, LG, i, j, 0,
+                                             BoundingBox=box, fillVal=current_val, layer=k,
+                                             dest2=mapNum, fillVal2=cnt, destLayer=k)
+
+                if numPixels == -2:
+                    mapMax.data[i, j, k] = current_val
+                    mapNum.data[i, j, k] = cnt
+                    numPixels = 1
+                    box[0] = box[1] = i
+                    box[2] = box[3] = j
+
+                # Store particle info
+                if cnt < info.data.shape[0]:
+                    info.data[cnt, 0] = i
+                    info.data[cnt, 1] = j
+                    info.data[cnt, 2] = real(numPixels)
+                    info.data[cnt, 3] = current_val
+                    info.data[cnt, 4] = box[0]
+                    info.data[cnt, 5] = box[1]
+                    info.data[cnt, 6] = box[2]
+                    info.data[cnt, 7] = box[3]
+                    info.data[cnt, 8] = DimOffset(detH, 2) * (DimDelta(detH, 2) ** k)
+                    info.data[cnt, 9] = k
+                    info.data[cnt, 10] = 1
+
+                cnt += 1
+
+    # Remove unused rows in the info wave
+    if cnt < info.data.shape[0]:
+        info.data = info.data[:cnt, :]
+
+    # Make the mapLG
+    mapDetH.data = np.where(mapNum.data != -1, detH.data, 0)
+
+    return 0
+
+
+def MaximalBlobs(info, mapNum):
+    """
+    Determines which blobs are scale-maximal (non-overlapping)
+    """
+    if info.data.shape[0] == 0:
+        return -1
+
+    # Initialize maximality of each particle as undetermined (-1)
+    info.data[:, 10] = -1
+
+    # Make lists for organizing overlapped particles
+    blob_numbers = np.arange(info.data.shape[0])
+    blob_strengths = info.data[:, 3].copy()
+
+    # Sort by blob strength (descending)
+    sort_indices = np.argsort(-blob_strengths)
+    blob_numbers = blob_numbers[sort_indices]
+    blob_strengths = blob_strengths[sort_indices]
+
+    limK = mapNum.data.shape[2]
+
+    for i in range(len(blob_numbers)):
+        # See if there's room for the i'th strongest particle
+        blocked = False
+        index = blob_numbers[i]
+        k = int(info.data[index, 9])
+
+        # Check if this particle overlaps with any already accepted particle
+        for ii in range(int(info.data[index, 4]), int(info.data[index, 5]) + 1):
+            for jj in range(int(info.data[index, 6]), int(info.data[index, 7]) + 1):
+                if mapNum.data[ii, jj, k] == index:
+                    # Check all scales at this position
+                    for kk in range(limK):
+                        if (mapNum.data[ii, jj, kk] != -1 and
+                                mapNum.data[ii, jj, kk] != index and
+                                info.data[int(mapNum.data[ii, jj, kk]), 10] == 1):
+                            blocked = True
+                            break
+                    if blocked:
+                        break
+                if blocked:
+                    break
+            if blocked:
+                break
+
+        info.data[index, 10] = 0 if blocked else 1
+
+    return 0
+
+
+def InteractiveThresholdGUI(im, detH, LG, particleType, maxCurvatureRatio):
+    """
+    Interactive threshold selection GUI
     """
     # First identify the maxes
-    from scale_space import find_scale_space_maxima
-    maxes, map_data, scale_map = find_scale_space_maxima(detH, LG, particleType, maxCurvatureRatio)
+    im_copy = Wave(im.data.copy(), "SS_MAXMAP")
+    im_copy.data.fill(-1)
+    scale_map = Wave(im_copy.data.copy(), "SS_MAXSCALEMAP")
 
-    # Convert to image units (square root)
-    maxes = np.sqrt(maxes[maxes > 0])
+    maxes = Maxes(detH, LG, particleType, maxCurvatureRatio, im_copy, scale_map)
+    maxes.data = np.sqrt(maxes.data)  # Put it into image units
 
-    # Create figure
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    if len(maxes.data) == 0:
+        return 0.0
+
+    # Create interactive plot
+    fig, ax = plt.subplots(figsize=(12, 8))
+    plt.subplots_adjust(bottom=0.25)
 
     # Display image
-    im_display = ax1.imshow(im, cmap='gray')
-    ax1.set_title('Original Image')
-
-    # Histogram of maxima
-    ax2.hist(maxes, bins=50, alpha=0.7)
-    ax2.set_xlabel('Blob Strength')
-    ax2.set_ylabel('Count')
-    ax2.set_title('Distribution of Blob Strengths')
+    im_display = ax.imshow(im.data, cmap='gray', origin='lower',
+                           extent=[DimOffset(im, 0),
+                                   DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
+                                   DimOffset(im, 1),
+                                   DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)])
+    ax.set_title("Interactive Blob Strength Selection")
 
     # Initial threshold
-    initial_thresh = np.median(maxes)
-    thresh_line = ax2.axvline(initial_thresh, color='r', linestyle='--', label='Threshold')
+    initial_thresh = np.max(maxes.data) / 2
 
-    # Circles for detected blobs
+    # Create slider
+    ax_thresh = plt.axes([0.2, 0.1, 0.5, 0.03])
+    thresh_slider = Slider(ax_thresh, 'Blob Strength',
+                           0, np.max(maxes.data) * 1.1,
+                           valinit=initial_thresh)
+
+    # Create buttons
+    ax_accept = plt.axes([0.75, 0.1, 0.1, 0.04])
+    ax_quit = plt.axes([0.75, 0.05, 0.1, 0.04])
+    accept_button = Button(ax_accept, 'Accept')
+    quit_button = Button(ax_quit, 'Quit')
+
+    # Store circles for updating
     circles = []
 
-    def update_display(thresh):
-        """Update the display with new threshold"""
+    result = {'threshold': initial_thresh, 'quit': False}
+
+    def update_threshold(val):
         # Clear previous circles
         for circle in circles:
             circle.remove()
         circles.clear()
 
-        # Find blobs above threshold
-        for i in range(map_data.shape[0]):
-            for j in range(map_data.shape[1]):
-                if map_data[i, j] > thresh ** 2:
-                    radius = np.sqrt(2 * scale_map[i, j])
-                    circle = plt.Circle((j, i), radius, fill=False, color='red', linewidth=2)
-                    ax1.add_patch(circle)
+        threshold = thresh_slider.val
+
+        # Draw circles for blobs above threshold
+        for i in range(im_copy.data.shape[0]):
+            for j in range(im_copy.data.shape[1]):
+                if im_copy.data[i, j] > threshold ** 2:
+                    xc = DimOffset(im_copy, 0) + i * DimDelta(im_copy, 0)
+                    yc = DimOffset(im_copy, 1) + j * DimDelta(im_copy, 1)
+                    rad = np.sqrt(2 * scale_map.data[i, j])
+
+                    circle = plt.Circle((xc, yc), rad, fill=False, color='red', linewidth=2)
+                    ax.add_patch(circle)
                     circles.append(circle)
 
-        # Update threshold line
-        thresh_line.set_xdata([thresh, thresh])
-        fig.canvas.draw_idle()
-
-    # Slider
-    ax_slider = plt.axes([0.2, 0.02, 0.6, 0.03])
-    slider = Slider(ax_slider, 'Blob Strength', 0, maxes.max() * 1.1,
-                    valinit=initial_thresh, valstep=maxes.max() / 200)
-
-    # Store threshold value
-    threshold_value = [initial_thresh]
-
-    def update(val):
-        threshold_value[0] = slider.val
-        update_display(slider.val)
-
-    slider.on_changed(update)
-
-    # Buttons
-    ax_accept = plt.axes([0.7, 0.92, 0.1, 0.04])
-    btn_accept = Button(ax_accept, 'Accept')
-
-    ax_quit = plt.axes([0.85, 0.92, 0.1, 0.04])
-    btn_quit = Button(ax_quit, 'Quit')
-
-    def accept(event):
-        plt.close(fig)
-
-    def quit_func(event):
-        threshold_value[0] = -1
-        plt.close(fig)
-
-    btn_accept.on_clicked(accept)
-    btn_quit.on_clicked(quit_func)
-
-    # Initial display
-    update_display(initial_thresh)
-
-    plt.show()
-
-    return threshold_value[0] if threshold_value[0] != -1 else None
-
-
-def flattening_interactive_threshold(im):
-    """
-    Interactive threshold selection for flattening mask
-
-    Returns:
-    float: Selected threshold value
-    """
-    fig, ax = plt.subplots(figsize=(8, 8))
-
-    # Display image
-    im_display = ax.imshow(im, cmap='gray')
-    ax.set_title('Set Height Threshold for Flattening')
-
-    # Mask overlay
-    mask = np.zeros_like(im)
-    mask_display = ax.imshow(mask, cmap='Blues', alpha=0.5, vmin=0, vmax=1)
-
-    # Initial threshold
-    initial_thresh = np.mean(im)
-
-    # Slider
-    ax_slider = plt.axes([0.2, 0.02, 0.6, 0.03])
-    slider = Slider(ax_slider, 'Threshold', im.min(), im.max(),
-                    valinit=initial_thresh, valstep=(im.max() - im.min()) / 300)
-
-    # Store threshold value
-    threshold_value = [initial_thresh]
-
-    def update(val):
-        threshold_value[0] = slider.val
-        # Update mask
-        mask = (im > slider.val).astype(float)
-        mask_display.set_data(mask)
-        fig.canvas.draw_idle()
-
-    slider.on_changed(update)
-
-    # Button
-    ax_accept = plt.axes([0.45, 0.92, 0.1, 0.04])
-    btn_accept = Button(ax_accept, 'Accept')
-
-    def accept(event):
-        plt.close(fig)
-
-    btn_accept.on_clicked(accept)
-
-    # Initial display
-    update(initial_thresh)
-
-    plt.show()
-
-    return threshold_value[0]
-
-
-def create_series_folder(base_path="./results"):
-    """Create a series folder similar to Igor Pro's Series_X naming"""
-    os.makedirs(base_path, exist_ok=True)
-
-    # Find next available series number
-    series_num = 0
-    while os.path.exists(os.path.join(base_path, f"Series_{series_num}")):
-        series_num += 1
-
-    series_folder = DataFolder(base_path, f"Series_{series_num}")
-    return series_folder
-
-
-def bilinear_interpolate(im, x0, y0, r0=0):
-    """
-    Bilinear interpolation matching Igor Pro implementation
-    """
-    # Get dimensions
-    if im.ndim == 2:
-        limP, limQ = im.shape
-    else:
-        limP, limQ, _ = im.shape
-
-    # Calculate positions
-    pMid = x0
-    p0 = max(0, int(np.floor(pMid)))
-    p1 = min(limP - 1, int(np.ceil(pMid)))
-
-    qMid = y0
-    q0 = max(0, int(np.floor(qMid)))
-    q1 = min(limQ - 1, int(np.ceil(qMid)))
-
-    # Interpolate
-    if im.ndim == 2:
-        pInterp0 = im[p0, q0] + (im[p1, q0] - im[p0, q0]) * (pMid - p0)
-        pInterp1 = im[p0, q1] + (im[p1, q1] - im[p0, q1]) * (pMid - p0)
-    else:
-        pInterp0 = im[p0, q0, r0] + (im[p1, q0, r0] - im[p0, q0, r0]) * (pMid - p0)
-        pInterp1 = im[p0, q1, r0] + (im[p1, q1, r0] - im[p0, q1, r0]) * (pMid - p0)
-
-    return pInterp0 + (pInterp1 - pInterp0) * (qMid - q0)
-
-
-def expand_boundary_8(mask):
-    """Expand boundary by 8-connectivity"""
-    mask_expanded = np.zeros_like(mask)
-
-    for i in range(1, mask.shape[0] - 1):
-        for j in range(1, mask.shape[1] - 1):
-            if mask[i, j] == 0:
-                # Check 8-connected neighbors
-                if (mask[i + 1, j] == 1 or mask[i - 1, j] == 1 or
-                        mask[i, j + 1] == 1 or mask[i, j - 1] == 1 or
-                        mask[i + 1, j + 1] == 1 or mask[i - 1, j + 1] == 1 or
-                        mask[i + 1, j - 1] == 1 or mask[i - 1, j - 1] == 1):
-                    mask_expanded[i, j] = 2
-            else:
-                mask_expanded[i, j] = mask[i, j]
-
-    return (mask_expanded > 0).astype(float)
-
-
-def expand_boundary_4(mask):
-    """Expand boundary by 4-connectivity"""
-    mask_expanded = np.zeros_like(mask)
-
-    for i in range(1, mask.shape[0] - 1):
-        for j in range(1, mask.shape[1] - 1):
-            if mask[i, j] == 0:
-                # Check 4-connected neighbors
-                if (mask[i + 1, j] == 1 or mask[i - 1, j] == 1 or
-                        mask[i, j + 1] == 1 or mask[i, j - 1] == 1):
-                    mask_expanded[i, j] = 2
-            else:
-                mask_expanded[i, j] = mask[i, j]
-
-    return (mask_expanded > 0).astype(float)
-
-
-def view_particles(particle_results):
-    """
-    View particles with navigation similar to Igor Pro's ViewParticles
-    """
-    if not particle_results or 'particles' not in particle_results:
-        print("No particles to view")
-        return
-
-    particles = particle_results['particles']
-    if not particles:
-        print("No particles found")
-        return
-
-    # Create figure
-    fig, ax = plt.subplots(figsize=(8, 8))
-
-    # Navigation state
-    current_idx = [0]
-
-    def show_particle(idx):
-        """Display particle at given index"""
-        ax.clear()
-
-        particle = particles[idx]
-        ax.imshow(particle['image'], cmap='hot')
-
-        # Show perimeter if available
-        if 'perimeter' in particle:
-            perimeter = particle['perimeter']
-            # Create colored overlay for perimeter
-            overlay = np.zeros((*perimeter.shape, 4))
-            overlay[perimeter > 0] = [0, 1, 0, 1]  # Green perimeter
-            ax.imshow(overlay)
-
-        # Display info
-        info_text = f"Particle {idx}\n"
-        if 'height' in particle:
-            info_text += f"Height: {particle['height']:.4f}\n"
-        if 'volume' in particle:
-            info_text += f"Volume: {particle['volume']:.4f}\n"
-        if 'area' in particle:
-            info_text += f"Area: {particle['area']:.4f}"
-
-        ax.set_title(info_text)
         fig.canvas.draw()
 
-    def on_key(event):
-        """Handle keyboard navigation"""
-        if event.key == 'right' and current_idx[0] < len(particles) - 1:
-            current_idx[0] += 1
-            show_particle(current_idx[0])
-        elif event.key == 'left' and current_idx[0] > 0:
-            current_idx[0] -= 1
-            show_particle(current_idx[0])
-        elif event.key == ' ' or event.key == 'down':
-            # Delete particle
-            response = input(f"Delete particle {current_idx[0]}? (y/n): ")
-            if response.lower() == 'y':
-                particles.pop(current_idx[0])
-                if current_idx[0] >= len(particles) and current_idx[0] > 0:
-                    current_idx[0] -= 1
-                if particles:
-                    show_particle(current_idx[0])
-                else:
-                    plt.close(fig)
+    def accept(event):
+        result['threshold'] = thresh_slider.val
+        plt.close()
 
-    # Connect keyboard handler
-    fig.canvas.mpl_connect('key_press_event', on_key)
+    def quit_app(event):
+        result['quit'] = True
+        plt.close()
 
-    # Show first particle
-    show_particle(0)
+    thresh_slider.on_changed(update_threshold)
+    accept_button.on_clicked(accept)
+    quit_button.on_clicked(quit_app)
+
+    # Initial update
+    update_threshold(initial_thresh)
 
     plt.show()
+
+    if result['quit']:
+        raise SystemExit("User quit the analysis")
+
+    return result['threshold']
+
+
+def Testing(string, num):
+    """
+    Testing function from original Igor code
+    """
+    print(f"You typed: {string}")
+    print(f"Your number plus two is {num + 2}")
+
+
+def KernelDensity(data, points=250, start=None, stop=None, bandwidth=None):
+    """
+    Kernel density estimation with an Epanechnikov kernel.
+    """
+    name = f"{data.name}_Epan"
+
+    if start is None or stop is None or bandwidth is None:
+        # Make some appropriate starting guesses
+        data_clean = data.data[~np.isnan(data.data)]
+        if len(data_clean) == 0:
+            return Wave(np.array([]), name)
+
+        min_val, max_val = np.min(data_clean), np.max(data_clean)
+
+        if bandwidth is None:
+            bandwidth = 3.5 * np.sqrt(np.var(data_clean)) / (len(data_clean) ** (1 / 3))
+        if start is None:
+            start = min_val - bandwidth
+        if stop is None:
+            stop = max_val + bandwidth
+
+    # Create output wave
+    epdf = Wave(np.zeros(points), name)
+    epdf.SetScale('x', start, (stop - start) / (points - 1))
+
+    # Create x coordinates
+    x_coords = np.linspace(start, stop, points)
+
+    # Compute kernel density
+    count = 0
+    for i, data_point in enumerate(data.data):
+        if not np.isnan(data_point):
+            # Epanechnikov kernel
+            u = (x_coords - data_point) / bandwidth
+            kernel_vals = np.maximum(1 - u ** 2, 0)
+            epdf.data += kernel_vals
+            count += 1
+
+    # Normalize
+    if count > 0:
+        epdf.data /= count * 4 * bandwidth / 3
+
+    # Add note with parameters
+    epdf.note = f"Start:{start}\nStop:{stop}\nBandwidth:{bandwidth}\nPoints:{points}\nDataPoints:{count}"
+
+    return epdf
+
+
+def ViewParticles():
+    """
+    Particle viewer function (simplified version)
+    This would be implemented as a full GUI in a complete version
+    """
+    particles_df = GetBrowserSelection(0)
+    folder = data_browser.get_folder(particles_df.rstrip(':'))
+
+    if folder is None or len(folder.subfolders) == 0:
+        messagebox.showerror("Error", "Please select the folder containing the crop folders.")
+        return -1
+
+    print(f"Viewing particles in {particles_df}")
+    print(f"Found {len(folder.subfolders)} particle folders")
+
+    # This would implement the full particle viewer GUI
+    # For now, just print information
+    for subfolder_name in folder.subfolders:
+        subfolder = folder.subfolders[subfolder_name]
+        if 'Particle_' in subfolder_name and len(subfolder.waves) > 0:
+            particle_wave = list(subfolder.waves.values())[0]
+            note_info = particle_wave.note
+
+            height = NumberByKey("Height", note_info, ":", "\n")
+            volume = NumberByKey("Volume", note_info, ":", "\n")
+            area = NumberByKey("Area", note_info, ":", "\n")
+
+            print(f"{subfolder_name}: Height={height:.4f}, Volume={volume:.4e}, Area={area:.4f}")
+
+    return 0
+
+
+def ParticleNumber(name):
+    """
+    Extract particle number from particle name
+    """
+    parts = name.split('_')
+    if len(parts) > 1:
+        try:
+            return int(parts[-1])
+        except ValueError:
+            return 0
+    return 0
+
+
+def SubfoldersList(folder):
+    """
+    Get list of subfolders in a data folder
+    """
+    if folder is None:
+        return []
+    return list(folder.subfolders.keys())
