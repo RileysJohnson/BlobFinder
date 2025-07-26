@@ -52,47 +52,52 @@ def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=Non
         for i in range(1, detH.data.shape[0] - 1):  # Y dimension
             for j in range(1, detH.data.shape[1] - 1):  # X dimension
 
-                current_response = detH.data[i, j, k]
+                current_val = detH.data[i, j, k]
 
-                # Check particle type constraint
-                if particleType == 1 and current_response <= 0:
+                # Check particle type
+                if particleType == 1 and current_val <= 0:
                     continue
-                elif particleType == -1 and current_response >= 0:
-                    continue
-                elif current_response == 0:
+                elif particleType == -1 and current_val >= 0:
                     continue
 
-                # Check if it's a local maximum in 3D neighborhood
+                # Check if this is a local maximum in 3D neighborhood
                 is_max = True
-                for di in [-1, 0, 1]:
-                    for dj in [-1, 0, 1]:
-                        for dk in [-1, 0, 1]:
+
+                # Check 3x3x3 neighborhood
+                for di in range(-1, 2):
+                    for dj in range(-1, 2):
+                        for dk in range(-1, 2):
                             if di == 0 and dj == 0 and dk == 0:
                                 continue
-                            if detH.data[i + di, j + dj, k + dk] >= current_response:
+                            neighbor_val = detH.data[i + di, j + dj, k + dk]
+                            if abs(neighbor_val) >= abs(current_val):
                                 is_max = False
                                 break
-                        if not is_max:
-                            break
                     if not is_max:
                         break
+                if not is_max:
+                    continue
 
-                if is_max:
-                    # Check curvature ratio constraint
-                    # The constraint is: LG^2 / detH < (maxCurvatureRatio + 1)^2 / maxCurvatureRatio
-                    lg_val = LG.data[i, j, k]
-                    if abs(current_response) > 1e-10:  # Avoid division by zero
-                        curvature_ratio = (lg_val ** 2) / abs(current_response)
-                        max_allowed = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
+                # Check curvature ratio if required
+                if maxCurvatureRatio > 0:
+                    # Calculate principal curvatures
+                    H = ComputeHessianMatrix(detH.data[:, :, k], j, i,
+                                             np.exp(DimOffset(detH, 2) + k * DimDelta(detH, 2)))
+                    eigenvalues = np.linalg.eigvals(H)
 
-                        if curvature_ratio < max_allowed:
-                            # Update if this is the strongest response at this position
-                            if abs(current_response) > abs(maxes_data[i, j]):
-                                maxes_data[i, j] = current_response
-                                if map_wave is not None:
-                                    map_wave.data[i, j] = current_response
-                                if scaleMap is not None:
-                                    scaleMap.data[i, j] = k
+                    if len(eigenvalues) == 2:
+                        ratio = abs(eigenvalues[0] / eigenvalues[1]) if eigenvalues[1] != 0 else np.inf
+                        if ratio > maxCurvatureRatio:
+                            continue
+
+                # This is a valid maximum
+                abs_val = abs(current_val)
+                if abs_val > maxes_data[i, j]:
+                    maxes_data[i, j] = abs_val
+                    if map_wave is not None:
+                        map_wave.data[i, j] = abs_val
+                    if scaleMap is not None:
+                        scaleMap.data[i, j] = k
 
     # Create output wave
     maxes_wave = Wave(maxes_data, "Maxes")
@@ -103,6 +108,42 @@ def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=Non
     print(f"Found {num_maxes} local maxima")
 
     return maxes_wave
+
+
+def ComputeHessianMatrix(layer, x_idx, y_idx, sigma):
+    """
+    Compute the Hessian matrix at a specific point
+    Direct port from Igor Pro implementation
+
+    Parameters:
+    layer : ndarray - 2D array representing a scale layer
+    x_idx, y_idx : int - Pixel coordinates
+    sigma : float - Scale parameter
+
+    Returns:
+    ndarray - 2x2 Hessian matrix
+    """
+    # Get neighborhood around the point
+    if (x_idx < 1 or x_idx >= layer.shape[1] - 1 or
+            y_idx < 1 or y_idx >= layer.shape[0] - 1):
+        return np.zeros((2, 2))
+
+    # Compute second derivatives using finite differences
+    # Second derivative in x direction
+    Lxx = layer[y_idx, x_idx + 1] - 2 * layer[y_idx, x_idx] + layer[y_idx, x_idx - 1]
+
+    # Second derivative in y direction
+    Lyy = layer[y_idx + 1, x_idx] - 2 * layer[y_idx, x_idx] + layer[y_idx - 1, x_idx]
+
+    # Mixed derivative
+    Lxy = (layer[y_idx + 1, x_idx + 1] - layer[y_idx + 1, x_idx - 1] -
+           layer[y_idx - 1, x_idx + 1] + layer[y_idx - 1, x_idx - 1]) / 4
+
+    # Construct Hessian matrix
+    H = np.array([[Lxx, Lxy],
+                  [Lxy, Lyy]])
+
+    return H
 
 
 def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, info,
@@ -131,50 +172,76 @@ def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, 
     # of the actual minimum detH response so that it is in normal image units
     minResponse = detHResponseThresh ** 2
 
-    # Initialize output maps
-    mapNum.data = np.full(im.data.shape, -1, dtype=np.int32)
-    mapNum.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
-    mapNum.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+    # First get the maxima
+    maxes_image_units = np.zeros(im.data.shape)
+    scale_map = np.zeros(im.data.shape)
 
-    mapDetH.data = np.zeros(im.data.shape)
-    mapDetH.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
-    mapDetH.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+    # Find local maxima in scale space
+    for k in range(1, detH.data.shape[2] - 1):
+        for i in range(1, detH.data.shape[0] - 1):
+            for j in range(1, detH.data.shape[1] - 1):
 
-    mapMax.data = np.zeros(im.data.shape)
-    mapMax.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
-    mapMax.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+                current_val = detH.data[i, j, k]
 
-    # Find local maxima using the Maxes function
-    map_wave = Wave(np.full(im.data.shape, -1.0), "TempMap")
-    scale_map = Wave(np.zeros(im.data.shape), "TempScaleMap")
-    maxes_wave = Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave, scale_map)
+                # Check particle type
+                if particleType == 1 and current_val <= 0:
+                    continue
+                elif particleType == -1 and current_val >= 0:
+                    continue
 
-    # Convert maxes to image units (square root)
-    maxes_image_units = np.sqrt(np.maximum(np.abs(maxes_wave.data), 0))
+                # Check if above threshold
+                if abs(current_val) < minResponse:
+                    continue
 
-    # Find blobs above threshold
+                # Check if local maximum
+                is_max = True
+                for di in range(-1, 2):
+                    for dj in range(-1, 2):
+                        for dk in range(-1, 2):
+                            if di == 0 and dj == 0 and dk == 0:
+                                continue
+                            if abs(detH.data[i + di, j + dj, k + dk]) >= abs(current_val):
+                                is_max = False
+                                break
+                    if not is_max:
+                        break
+                if not is_max:
+                    continue
+
+                # Check curvature ratio
+                if maxCurvatureRatio > 0:
+                    sigma = np.exp(DimOffset(detH, 2) + k * DimDelta(detH, 2))
+                    H = ComputeHessianMatrix(detH.data[:, :, k], j, i, sigma)
+                    eigenvalues = np.linalg.eigvals(H)
+
+                    if len(eigenvalues) == 2 and eigenvalues[1] != 0:
+                        ratio = abs(eigenvalues[0] / eigenvalues[1])
+                        if ratio > maxCurvatureRatio:
+                            continue
+
+                # Store the maximum
+                if abs(current_val) > maxes_image_units[i, j]:
+                    maxes_image_units[i, j] = np.sqrt(abs(current_val))
+                    scale_map[i, j] = k
+                    mapNum.data[i, j] = abs(current_val)  # Temporarily store response
+
+    # Now identify distinct blobs
     blob_candidates = []
-    for i in range(maxes_wave.data.shape[0]):
-        for j in range(maxes_wave.data.shape[1]):
-            if maxes_image_units[i, j] >= detHResponseThresh and map_wave.data[i, j] > minResponse:
-                scale_idx = int(scale_map.data[i, j])
 
-                # Calculate real-world coordinates
-                x_coord = DimOffset(im, 0) + j * DimDelta(im, 0)
-                y_coord = DimOffset(im, 1) + i * DimDelta(im, 1)
-
-                # Calculate scale value
-                if scale_idx < detH.data.shape[2]:
-                    scale_value = np.exp(DimOffset(detH, 2) + scale_idx * DimDelta(detH, 2))
-                else:
-                    scale_value = 1.0
+    for i in range(im.data.shape[0]):
+        for j in range(im.data.shape[1]):
+            if maxes_image_units[i, j] > 0:
+                scale_idx = int(scale_map[i, j])
+                scale_value = np.exp(DimOffset(detH, 2) + scale_idx * DimDelta(detH, 2))
 
                 blob_candidates.append({
-                    'i': i, 'j': j,
-                    'x': x_coord, 'y': y_coord,
+                    'i': i,
+                    'j': j,
+                    'x': DimOffset(im, 0) + j * DimDelta(im, 0),
+                    'y': DimOffset(im, 1) + i * DimDelta(im, 1),
                     'scale_idx': scale_idx,
                     'scale_value': scale_value,
-                    'response': map_wave.data[i, j],
+                    'response': mapNum.data[i, j],
                     'strength': maxes_image_units[i, j],
                     'max_value': im.data[i, j]
                 })
@@ -185,6 +252,11 @@ def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, 
     # Process blobs and handle overlaps
     accepted_blobs = []
     particle_number = 0
+
+    # Reset maps
+    mapNum.data.fill(-1)
+    mapDetH.data.fill(0)
+    mapMax.data.fill(0)
 
     for candidate in blob_candidates:
         i, j = candidate['i'], candidate['j']
@@ -267,55 +339,55 @@ def SubPixelMaxima3D(detH, LG, i, j, k, maxCurvatureRatio):
     dy = (neighborhood[2, 1, 1] - neighborhood[0, 1, 1]) / 2
     dz = (neighborhood[1, 1, 2] - neighborhood[1, 1, 0]) / 2
 
-    # Second derivatives (Hessian)
+    # Second derivatives
     dxx = neighborhood[1, 2, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 0, 1]
     dyy = neighborhood[2, 1, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[0, 1, 1]
     dzz = neighborhood[1, 1, 2] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 1, 0]
 
     # Mixed derivatives
-    dxy = (neighborhood[2, 2, 1] - neighborhood[2, 0, 1] - neighborhood[0, 2, 1] + neighborhood[0, 0, 1]) / 4
-    dxz = (neighborhood[1, 2, 2] - neighborhood[1, 2, 0] - neighborhood[1, 0, 2] + neighborhood[1, 0, 0]) / 4
-    dyz = (neighborhood[2, 1, 2] - neighborhood[2, 1, 0] - neighborhood[0, 1, 2] + neighborhood[0, 1, 0]) / 4
+    dxy = (neighborhood[2, 2, 1] - neighborhood[2, 0, 1] -
+           neighborhood[0, 2, 1] + neighborhood[0, 0, 1]) / 4
+    dxz = (neighborhood[1, 2, 2] - neighborhood[1, 0, 2] -
+           neighborhood[1, 2, 0] + neighborhood[1, 0, 0]) / 4
+    dyz = (neighborhood[2, 1, 2] - neighborhood[0, 1, 2] -
+           neighborhood[2, 1, 0] + neighborhood[0, 1, 0]) / 4
 
     # Construct Hessian matrix
     H = np.array([[dxx, dxy, dxz],
                   [dxy, dyy, dyz],
                   [dxz, dyz, dzz]])
 
-    gradient = np.array([dx, dy, dz])
-
-    # Solve for sub-pixel offset: H * offset = -gradient
+    # Calculate offset using Newton's method
     try:
-        offset = np.linalg.solve(H, -gradient)
+        offset = -np.linalg.solve(H, np.array([dx, dy, dz]))
 
-        # Limit offset to reasonable range
+        # Limit offset to reasonable values
         offset = np.clip(offset, -0.5, 0.5)
 
         # Calculate refined position
-        refined_i = i + offset[1]  # Note: offset[1] is for y direction
-        refined_j = j + offset[0]  # Note: offset[0] is for x direction
-        refined_k = k + offset[2]
+        j_refined = j + offset[0]
+        i_refined = i + offset[1]
+        k_refined = k + offset[2]
 
-        # Calculate refined value
-        refined_value = (neighborhood[1, 1, 1] +
-                         0.5 * np.dot(gradient, offset))
+        # Interpolate value at refined position
+        value_refined = BilinearInterpolate(detH,
+                                            DimOffset(detH, 0) + j_refined * DimDelta(detH, 0),
+                                            DimOffset(detH, 1) + i_refined * DimDelta(detH, 1),
+                                            DimOffset(detH, 2) + k_refined * DimDelta(detH, 2))
 
-        return refined_i, refined_j, refined_k, refined_value
+        return i_refined, j_refined, k_refined, value_refined
 
     except np.linalg.LinAlgError:
         # If Hessian is singular, return original position
         return i, j, k, detH.data[i, j, k]
 
 
-def MaxOccupancy(mapNum, particleNum, radius):
+def CountParticlePixels(mapNum, particleNum, radius):
     """
-    Check maximum occupancy in a circular region
-    Direct port from Igor Pro MaxOccupancy function
+    Count the number of pixels belonging to a particle
+    Direct port from Igor Pro function
     """
-    if particleNum < 0:
-        return 0
-
-    # Find center of particle
+    # Find particle center
     indices = np.where(mapNum.data == particleNum)
     if len(indices[0]) == 0:
         return 0

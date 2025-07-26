@@ -108,50 +108,70 @@ class HessianBlobGUI:
 
         self.images_listbox.bind('<<ListboxSelect>>', self.on_image_select)
 
-        # Analysis controls section
-        analysis_frame = ttk.LabelFrame(left_frame, text="Analysis Controls", padding="10")
+        # Analysis controls
+        analysis_frame = ttk.LabelFrame(left_frame, text="Analysis", padding="10")
         analysis_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(analysis_frame, text="Run Hessian Blob Detection",
-                   command=self.run_hessian_blob_detection, width=25).pack(pady=2)
-        ttk.Button(analysis_frame, text="Batch Process All Images",
-                   command=self.batch_process_images, width=25).pack(pady=2)
-
-        # View controls section
-        view_frame = ttk.LabelFrame(left_frame, text="View Controls", padding="10")
-        view_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Button(view_frame, text="Show Original Image",
-                   command=self.show_original_image, width=20).pack(pady=2)
-        ttk.Button(view_frame, text="Show Results Overlay",
-                   command=self.show_results_overlay, width=20).pack(pady=2)
-        ttk.Button(view_frame, text="Show Statistics",
-                   command=self.show_statistics, width=20).pack(pady=2)
+                   command=self.run_blob_detection, width=20).pack(pady=2)
+        ttk.Button(analysis_frame, text="Batch Process All",
+                   command=self.batch_process_all, width=20).pack(pady=2)
 
         # === RIGHT PANEL ===
 
-        # Image display area
-        display_frame = ttk.LabelFrame(right_frame, text="Image Display", padding="10")
-        display_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # Create notebook for multiple views
+        self.notebook = ttk.Notebook(right_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
+        # Image display tab
+        self.image_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.image_frame, text="Image Display")
+
+        # Results tab
+        self.results_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.results_frame, text="Results")
+
+        # Log tab
+        self.log_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.log_frame, text="Log")
+
+        # Setup log text widget
+        self.log_text = scrolledtext.ScrolledText(self.log_frame, wrap=tk.WORD, height=20)
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Setup image display
+        self.setup_image_display()
+
+        # Setup results display
+        self.setup_results_display()
+
+    def setup_image_display(self):
+        """Setup the image display area"""
         # Create matplotlib figure
         self.fig = Figure(figsize=(8, 6), dpi=100)
         self.ax = self.fig.add_subplot(111)
-        self.ax.set_title("No image loaded")
-        self.ax.set_xlabel("X")
-        self.ax.set_ylabel("Y")
+        self.ax.set_title("No Image Loaded")
+        self.ax.axis('off')
 
         # Create canvas
-        self.canvas = FigureCanvasTkAgg(self.fig, display_frame)
+        self.canvas = FigureCanvasTkAgg(self.fig, self.image_frame)
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Log area
-        log_frame = ttk.LabelFrame(right_frame, text="Log Output", padding="10")
-        log_frame.pack(fill=tk.X)
+        # Control buttons
+        control_frame = ttk.Frame(self.image_frame)
+        control_frame.pack(fill=tk.X, pady=5)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, width=80)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(control_frame, text="Zoom In", command=self.zoom_in).pack(side=tk.LEFT, padx=2)
+        ttk.Button(control_frame, text="Zoom Out", command=self.zoom_out).pack(side=tk.LEFT, padx=2)
+        ttk.Button(control_frame, text="Reset View", command=self.reset_view).pack(side=tk.LEFT, padx=2)
+        ttk.Button(control_frame, text="Toggle Overlay", command=self.toggle_overlay).pack(side=tk.LEFT, padx=2)
+
+    def setup_results_display(self):
+        """Setup the results display area"""
+        # Create text widget for results
+        self.results_text = scrolledtext.ScrolledText(self.results_frame, wrap=tk.WORD, height=20)
+        self.results_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
     def setup_menu(self):
         """Setup the menu bar"""
@@ -161,583 +181,499 @@ class HessianBlobGUI:
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Load Single Image", command=self.load_single_image)
-        file_menu.add_command(label="Load Multiple Images", command=self.load_multiple_images)
-        file_menu.add_command(label="Load Folder", command=self.load_folder)
+        file_menu.add_command(label="Load Image...", command=self.load_single_image)
+        file_menu.add_command(label="Load Multiple Images...", command=self.load_multiple_images)
+        file_menu.add_command(label="Load Folder...", command=self.load_folder)
         file_menu.add_separator()
-        file_menu.add_command(label="Save Results", command=self.save_results)
+        file_menu.add_command(label="Save Results...", command=self.save_results)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
 
         # Analysis menu
         analysis_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Analysis", menu=analysis_menu)
-        analysis_menu.add_command(label="Hessian Blob Detection", command=self.run_hessian_blob_detection)
-        analysis_menu.add_command(label="Batch Process All", command=self.batch_process_images)
+        analysis_menu.add_command(label="Hessian Blob Detection", command=self.run_blob_detection)
+        analysis_menu.add_command(label="Batch Process All", command=self.batch_process_all)
         analysis_menu.add_separator()
-        analysis_menu.add_command(label="Preprocess Images", command=self.preprocess_images)
+        analysis_menu.add_command(label="Preprocessing...", command=self.run_preprocessing)
 
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_command(label="Original Image", command=self.show_original_image)
-        view_menu.add_command(label="Results Overlay", command=self.show_results_overlay)
-        view_menu.add_command(label="Statistics", command=self.show_statistics)
-
-        # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Testing Function", command=self.run_testing)
+        view_menu.add_command(label="Show Particle Statistics", command=self.show_statistics)
+        view_menu.add_command(label="Show Particle Viewer", command=self.show_particle_viewer)
+        view_menu.add_separator()
+        view_menu.add_command(label="Clear Log", command=self.clear_log)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self.show_about)
+        help_menu.add_command(label="Tutorial", command=self.show_tutorial)
 
     def log_message(self, message):
-        """Add a message to the log output"""
-        self.log_text.insert(tk.END, f"{message}\n")
+        """Add a message to the log"""
+        self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
-        self.root.update_idletasks()
+        self.root.update()
+
+    def load_single_image(self):
+        """Load a single image file"""
+        filetypes = [
+            ("All Supported", "*.tif;*.tiff;*.png;*.jpg;*.jpeg;*.ibw"),
+            ("TIFF files", "*.tif;*.tiff"),
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg;*.jpeg"),
+            ("Igor Binary Wave", "*.ibw"),
+            ("All files", "*.*")
+        ]
+
+        filename = filedialog.askopenfilename(
+            title="Select Image File",
+            filetypes=filetypes
+        )
+
+        if filename:
+            self.load_image_file(filename)
+
+    def load_multiple_images(self):
+        """Load multiple image files"""
+        filetypes = [
+            ("All Supported", "*.tif;*.tiff;*.png;*.jpg;*.jpeg;*.ibw"),
+            ("TIFF files", "*.tif;*.tiff"),
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg;*.jpeg"),
+            ("Igor Binary Wave", "*.ibw"),
+            ("All files", "*.*")
+        ]
+
+        filenames = filedialog.askopenfilenames(
+            title="Select Image Files",
+            filetypes=filetypes
+        )
+
+        for filename in filenames:
+            self.load_image_file(filename)
+
+    def load_folder(self):
+        """Load all images from a folder"""
+        folder = filedialog.askdirectory(title="Select Folder Containing Images")
+
+        if folder:
+            # Find all image files in folder
+            extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.ibw']
+            folder_path = Path(folder)
+
+            image_files = []
+            for ext in extensions:
+                image_files.extend(folder_path.glob(f"*{ext}"))
+                image_files.extend(folder_path.glob(f"*{ext.upper()}"))
+
+            self.log_message(f"Found {len(image_files)} image files in {folder}")
+
+            for filepath in image_files:
+                self.load_image_file(str(filepath))
+
+    def load_image_file(self, filepath):
+        """Load an individual image file"""
+        try:
+            self.log_message(f"Loading {os.path.basename(filepath)}...")
+
+            # Load the image
+            wave = LoadWave(filepath)
+
+            if wave is None:
+                self.log_message(f"Failed to load {filepath}")
+                return
+
+            # Store the image
+            filename = os.path.basename(filepath)
+            self.current_images[filename] = wave
+
+            # Add to listbox
+            self.images_listbox.insert(tk.END, filename)
+
+            # Select the newly loaded image
+            self.images_listbox.selection_clear(0, tk.END)
+            self.images_listbox.selection_set(tk.END)
+            self.images_listbox.see(tk.END)
+
+            self.log_message(f"Successfully loaded {filename}")
+            self.log_message(f"  Shape: {wave.data.shape}")
+            self.log_message(f"  Type: {wave.data.dtype}")
+
+            # Display the image
+            self.display_image(wave)
+
+        except Exception as e:
+            self.log_message(f"Error loading {filepath}: {str(e)}")
+            messagebox.showerror("Load Error", f"Failed to load image:\n{str(e)}")
 
     def on_image_select(self, event):
         """Handle image selection from listbox"""
         selection = self.images_listbox.curselection()
         if selection:
             filename = self.images_listbox.get(selection[0])
-            self.current_display_image = filename
-            self.show_original_image()
+            if filename in self.current_images:
+                self.current_display_image = filename
+                self.display_image(self.current_images[filename])
 
-    # === FILE LOADING METHODS ===
+                # Display results if available
+                if filename in self.current_results:
+                    self.display_results(self.current_results[filename])
 
-    def load_single_image(self):
-        """Load a single image file using OS file dialog"""
-        file_path = filedialog.askopenfilename(
-            title="Select Single Image File",
-            filetypes=[
-                ("Igor Binary Wave", "*.ibw"),
-                ("TIFF files", "*.tif *.tiff"),
-                ("PNG files", "*.png"),
-                ("JPEG files", "*.jpg *.jpeg"),
-                ("All supported", "*.ibw *.tif *.tiff *.png *.jpg *.jpeg"),
-                ("All files", "*.*")
-            ]
-        )
+    def display_image(self, wave):
+        """Display an image in the main view"""
+        self.ax.clear()
 
-        if file_path:
-            self.load_image_files([file_path])
+        # Display the image
+        im = self.ax.imshow(wave.data, cmap='gray', origin='lower',
+                            extent=[DimOffset(wave, 0),
+                                    DimOffset(wave, 0) + wave.data.shape[1] * DimDelta(wave, 0),
+                                    DimOffset(wave, 1),
+                                    DimOffset(wave, 1) + wave.data.shape[0] * DimDelta(wave, 1)])
 
-    def load_multiple_images(self):
-        """Load multiple image files using OS file dialog"""
-        file_paths = filedialog.askopenfilenames(
-            title="Select Multiple Image Files",
-            filetypes=[
-                ("Igor Binary Wave", "*.ibw"),
-                ("TIFF files", "*.tif *.tiff"),
-                ("PNG files", "*.png"),
-                ("JPEG files", "*.jpg *.jpeg"),
-                ("All supported", "*.ibw *.tif *.tiff *.png *.jpg *.jpeg"),
-                ("All files", "*.*")
-            ]
-        )
+        self.ax.set_title(wave.name)
+        self.ax.set_xlabel("X")
+        self.ax.set_ylabel("Y")
 
-        if file_paths:
-            self.load_image_files(file_paths)
+        # Add colorbar
+        if hasattr(self, 'colorbar'):
+            self.colorbar.remove()
+        self.colorbar = self.fig.colorbar(im, ax=self.ax)
 
-    def load_folder(self):
-        """Load all supported images from a folder"""
-        folder_path = filedialog.askdirectory(title="Select Folder with Images")
+        self.canvas.draw()
 
-        if folder_path:
-            # Find all supported image files in the folder
-            supported_extensions = ['.ibw', '.tif', '.tiff', '.png', '.jpg', '.jpeg']
-            image_files = []
-
-            for ext in supported_extensions:
-                image_files.extend(Path(folder_path).glob(f"*{ext}"))
-                image_files.extend(Path(folder_path).glob(f"*{ext.upper()}"))
-
-            if image_files:
-                self.load_image_files([str(f) for f in image_files])
-            else:
-                messagebox.showwarning("No Images", "No supported image files found in the selected folder.")
-
-    def load_image_files(self, file_paths):
-        """Load image files into the application"""
-        loaded_count = 0
-
-        for file_path in file_paths:
-            try:
-                # Load the image
-                wave = load_image(file_path)
-                if wave is not None:
-                    filename = os.path.basename(file_path)
-
-                    # Store the image
-                    self.current_images[filename] = wave
-
-                    # Add to listbox
-                    self.images_listbox.insert(tk.END, filename)
-
-                    loaded_count += 1
-                    self.log_message(f"Loaded: {filename}")
-
-                else:
-                    self.log_message(f"Failed to load: {os.path.basename(file_path)}")
-
-            except Exception as e:
-                self.log_message(f"Error loading {os.path.basename(file_path)}: {str(e)}")
-
-        if loaded_count > 0:
-            self.log_message(f"Successfully loaded {loaded_count} image(s)")
-
-            # Select and display the first loaded image
-            if self.current_display_image is None and self.current_images:
-                first_image = list(self.current_images.keys())[0]
-                self.current_display_image = first_image
-                self.images_listbox.selection_set(0)
-                self.show_original_image()
-        else:
-            messagebox.showerror("Load Error", "No images could be loaded.")
-
-    # === ANALYSIS METHODS ===
-
-    def run_hessian_blob_detection(self):
-        """Run Hessian blob detection on selected image"""
+    def run_blob_detection(self):
+        """Run Hessian blob detection on current image"""
         if not self.current_display_image:
-            messagebox.showwarning("No Image", "Please select an image first.")
+            messagebox.showwarning("No Image", "Please load an image first.")
             return
 
+        wave = self.current_images[self.current_display_image]
+
+        # Get parameters
+        params = GetBlobDetectionParams()
+        if params is None:
+            return  # User cancelled
+
+        self.log_message(f"\nRunning Hessian Blob Detection on {self.current_display_image}")
+        self.log_message(f"Parameters: {params}")
+
         try:
-            self.log_message("Starting Hessian blob detection...")
-
-            # Get the current image
-            im = self.current_images[self.current_display_image]
-
-            # Get parameters from user
-            params = GetBlobDetectionParams()
-            if params is None:
-                self.log_message("Blob detection cancelled by user.")
-                return
-
-            self.log_message(
-                f"Parameters: Scale={params['scaleStart']}, Layers={params['layers']}, Factor={params['scaleFactor']}")
-
-            # Compute scale-space representation
-            self.log_message("Computing scale-space representation...")
-            L = ScaleSpaceRepresentation(im, params['layers'], params['scaleStart'], params['scaleFactor'])
+            # Create scale-space representation
+            self.log_message("Creating scale-space representation...")
+            L = ScaleSpaceRepresentation(wave, params['layers'],
+                                         params['scale_start'], params['scale_factor'])
 
             # Compute blob detectors
             self.log_message("Computing blob detectors...")
-            detH, LG = BlobDetectors(L, True)  # gammaNorm=True
+            detH, LG = BlobDetectors(L, True)
 
-            # Interactive threshold selection - this is the key fix!
-            self.log_message("Opening interactive threshold selection...")
-            threshold = InteractiveThreshold(im, detH, LG, params['particleType'], params['maxCurvatureRatio'])
+            # Get threshold
+            if params['threshold'] == -2:
+                # Interactive threshold
+                self.log_message("Opening interactive threshold window...")
+                threshold = InteractiveThreshold(wave, detH, LG,
+                                                 params['particle_type'],
+                                                 params['max_curvature_ratio'])
+                if threshold is None:
+                    self.log_message("Threshold selection cancelled")
+                    return
+            elif params['threshold'] == -1:
+                # Otsu's method
+                self.log_message("Calculating Otsu threshold...")
+                threshold = OtsuThreshold(detH, params['particle_type'])
+            else:
+                threshold = params['threshold']
 
-            if threshold is None:
-                self.log_message("Threshold selection cancelled.")
-                return
-
-            self.log_message(f"Selected threshold: {threshold:.6f}")
-
-            # Initialize output waves
-            mapNum = Wave(np.zeros(im.data.shape, dtype=np.int32), "ParticleMap")
-            mapDetH = Wave(np.zeros(im.data.shape), "DetHMap")
-            mapMax = Wave(np.zeros(im.data.shape), "MaxMap")
-            info = Wave(np.zeros((0, 10)), "ParticleInfo")
+            self.log_message(f"Using threshold: {threshold}")
 
             # Find blobs
             self.log_message("Finding Hessian blobs...")
-            num_particles = FindHessianBlobs(im, detH, LG, threshold, mapNum, mapDetH, mapMax, info,
-                                             params['particleType'], params['maxCurvatureRatio'])
+
+            # Create output maps
+            mapNum = Duplicate(wave, f"{wave.name}_mapNum")
+            mapNum.data = np.full(wave.data.shape, -1)
+
+            mapDetH = Duplicate(wave, f"{wave.name}_mapDetH")
+            mapDetH.data = np.zeros(wave.data.shape)
+
+            mapMax = Duplicate(wave, f"{wave.name}_mapMax")
+            mapMax.data = np.zeros(wave.data.shape)
+
+            info = Wave(np.zeros((0, 20)), f"{wave.name}_info")
+
+            num_particles = FindHessianBlobs(wave, detH, LG, threshold,
+                                             mapNum, mapDetH, mapMax, info,
+                                             params['particle_type'],
+                                             params['max_curvature_ratio'])
+
+            self.log_message(f"Found {num_particles} particles")
 
             # Store results
-            results = {
-                'num_particles': num_particles,
-                'threshold': threshold,
-                'parameters': params,
+            self.current_results[self.current_display_image] = {
                 'mapNum': mapNum,
                 'mapDetH': mapDetH,
                 'mapMax': mapMax,
                 'info': info,
-                'detH': detH,
-                'LG': LG,
-                'L': L
+                'num_particles': num_particles,
+                'params': params,
+                'threshold': threshold
             }
 
-            self.current_results[self.current_display_image] = results
-            self.current_display_results = self.current_display_image
+            # Display results
+            self.display_results(self.current_results[self.current_display_image])
 
-            self.log_message(f"Detection completed! Found {num_particles} particles.")
-
-            # Automatically show results overlay
-            self.show_results_overlay()
+            # Show results tab
+            self.notebook.select(self.results_frame)
 
         except Exception as e:
-            error_msg = f"Error during blob detection: {str(e)}"
-            self.log_message(error_msg)
-            messagebox.showerror("Detection Error", error_msg)
+            self.log_message(f"Error during blob detection: {str(e)}")
+            messagebox.showerror("Analysis Error", f"Blob detection failed:\n{str(e)}")
 
-    def batch_process_images(self):
+    def display_results(self, results):
+        """Display analysis results"""
+        self.results_text.delete(1.0, tk.END)
+
+        self.results_text.insert(tk.END, f"=== Blob Detection Results ===\n\n")
+        self.results_text.insert(tk.END, f"Number of particles found: {results['num_particles']}\n")
+        self.results_text.insert(tk.END, f"Threshold used: {results['threshold']:.6f}\n\n")
+
+        self.results_text.insert(tk.END, "Parameters:\n")
+        for key, value in results['params'].items():
+            self.results_text.insert(tk.END, f"  {key}: {value}\n")
+
+        if results['num_particles'] > 0:
+            info = results['info']
+            self.results_text.insert(tk.END, f"\n\nParticle Statistics:\n")
+            self.results_text.insert(tk.END, f"  Mean X: {np.mean(info.data[:, 0]):.2f}\n")
+            self.results_text.insert(tk.END, f"  Mean Y: {np.mean(info.data[:, 1]):.2f}\n")
+            self.results_text.insert(tk.END, f"  Mean Scale: {np.mean(info.data[:, 3]):.2f}\n")
+            self.results_text.insert(tk.END, f"  Mean Strength: {np.mean(info.data[:, 4]):.2f}\n")
+
+        # Update image display with overlay
+        self.display_image_with_overlay()
+
+    def display_image_with_overlay(self):
+        """Display image with detected blobs overlay"""
+        if not self.current_display_image:
+            return
+
+        wave = self.current_images[self.current_display_image]
+
+        self.ax.clear()
+
+        # Display the image
+        self.ax.imshow(wave.data, cmap='gray', origin='lower', alpha=0.8,
+                       extent=[DimOffset(wave, 0),
+                               DimOffset(wave, 0) + wave.data.shape[1] * DimDelta(wave, 0),
+                               DimOffset(wave, 1),
+                               DimOffset(wave, 1) + wave.data.shape[0] * DimDelta(wave, 1)])
+
+        # Add blob overlays if results exist
+        if self.current_display_image in self.current_results:
+            results = self.current_results[self.current_display_image]
+            info = results['info']
+
+            # Draw circles for each blob
+            for i in range(info.data.shape[0]):
+                x = info.data[i, 0]
+                y = info.data[i, 1]
+                scale = info.data[i, 3]
+                radius = np.sqrt(2 * scale)
+
+                circle = Circle((x, y), radius, fill=False,
+                                color='red', linewidth=2, alpha=0.8)
+                self.ax.add_patch(circle)
+
+        self.ax.set_title(f"{wave.name} - Detected Blobs")
+        self.ax.set_xlabel("X")
+        self.ax.set_ylabel("Y")
+
+        self.canvas.draw()
+
+    def batch_process_all(self):
         """Run blob detection on all loaded images"""
         if not self.current_images:
             messagebox.showwarning("No Images", "Please load images first.")
             return
 
-        # Get parameters once for all images
-        params = GetBlobDetectionParams()
-        if params is None:
-            return
+        # Create a simple folder structure for batch processing
+        class ImageFolder:
+            def __init__(self, waves):
+                self.waves = waves
 
-        total_images = len(self.current_images)
-        processed = 0
+        folder = ImageFolder(self.current_images)
 
-        for filename, im in self.current_images.items():
-            try:
-                self.log_message(f"Processing {filename} ({processed + 1}/{total_images})...")
+        # Run batch processing
+        BatchHessianBlobs(folder)
 
-                # Compute scale-space representation
-                L = ScaleSpaceRepresentation(im, params['layers'], params['scaleStart'], params['scaleFactor'])
-
-                # Compute blob detectors
-                detH, LG = BlobDetectors(L, True)
-
-                # Use interactive threshold for first image, then apply to all
-                if processed == 0:
-                    threshold = InteractiveThreshold(im, detH, LG, params['particleType'], params['maxCurvatureRatio'])
-                    if threshold is None:
-                        self.log_message("Batch processing cancelled.")
-                        return
-                    batch_threshold = threshold
-                else:
-                    threshold = batch_threshold
-
-                # Initialize output waves
-                mapNum = Wave(np.zeros(im.data.shape, dtype=np.int32), "ParticleMap")
-                mapDetH = Wave(np.zeros(im.data.shape), "DetHMap")
-                mapMax = Wave(np.zeros(im.data.shape), "MaxMap")
-                info = Wave(np.zeros((0, 10)), "ParticleInfo")
-
-                # Find blobs
-                num_particles = FindHessianBlobs(im, detH, LG, threshold, mapNum, mapDetH, mapMax, info,
-                                                 params['particleType'], params['maxCurvatureRatio'])
-
-                # Store results
-                results = {
-                    'num_particles': num_particles,
-                    'threshold': threshold,
-                    'parameters': params,
-                    'mapNum': mapNum,
-                    'mapDetH': mapDetH,
-                    'mapMax': mapMax,
-                    'info': info,
-                    'detH': detH,
-                    'LG': LG,
-                    'L': L
-                }
-
-                self.current_results[filename] = results
-                processed += 1
-
-                self.log_message(f"  Found {num_particles} particles in {filename}")
-
-            except Exception as e:
-                self.log_message(f"Error processing {filename}: {str(e)}")
-                continue
-
-        self.log_message(f"Batch processing completed! Processed {processed}/{total_images} images.")
-
-        # Show results for current image if available
-        if self.current_display_image in self.current_results:
-            self.current_display_results = self.current_display_image
-            self.show_results_overlay()
-
-    # === DISPLAY METHODS ===
-
-    def show_original_image(self):
-        """Display the original image"""
-        if not self.current_display_image or self.current_display_image not in self.current_images:
-            return
-
+    def run_preprocessing(self):
+        """Run preprocessing on images"""
         try:
-            im = self.current_images[self.current_display_image]
-
-            self.ax.clear()
-            self.ax.imshow(im.data, cmap='gray', origin='lower',
-                           extent=[DimOffset(im, 0),
-                                   DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
-                                   DimOffset(im, 1),
-                                   DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)])
-
-            self.ax.set_title(f"Original Image: {self.current_display_image}")
-            self.ax.set_xlabel("X")
-            self.ax.set_ylabel("Y")
-
-            self.canvas.draw()
-
-        except Exception as e:
-            self.log_message(f"Error displaying image: {str(e)}")
-
-    def show_results_overlay(self):
-        """Display image with detected particles overlaid"""
-        if (not self.current_display_image or
-                self.current_display_image not in self.current_images or
-                self.current_display_image not in self.current_results):
-            messagebox.showwarning("No Results", "No detection results available for current image.")
-            return
-
-        try:
-            im = self.current_images[self.current_display_image]
-            results = self.current_results[self.current_display_image]
-            info = results['info']
-
-            self.ax.clear()
-            self.ax.imshow(im.data, cmap='gray', origin='lower',
-                           extent=[DimOffset(im, 0),
-                                   DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
-                                   DimOffset(im, 1),
-                                   DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)])
-
-            # Draw circles for detected particles
-            if info.data.shape[0] > 0:
-                for i in range(info.data.shape[0]):
-                    x_coord = info.data[i, 0]
-                    y_coord = info.data[i, 1]
-
-                    # Calculate radius from scale
-                    if info.data.shape[1] > 3:
-                        scale_value = info.data[i, 3]
-                    else:
-                        scale_idx = int(info.data[i, 2]) if info.data.shape[1] > 2 else 5
-                        scale_value = 1.0 * (1.5 ** scale_idx)
-
-                    radius = np.sqrt(2 * scale_value)
-
-                    # Draw circle
-                    circle = Circle((x_coord, y_coord), radius, fill=False,
-                                    color='red', linewidth=2, alpha=0.8)
-                    self.ax.add_patch(circle)
-
-                    # Add particle number
-                    self.ax.text(x_coord + radius, y_coord + radius, str(i + 1),
-                                 color='yellow', fontsize=8, ha='left', va='bottom',
-                                 weight='bold', bbox=dict(boxstyle='round,pad=0.2',
-                                                          facecolor='black', alpha=0.7))
-
-                self.log_message(f"Displayed {info.data.shape[0]} detected particles")
-
-            self.ax.set_title(f"Detected Particles: {self.current_display_image} ({results['num_particles']} found)")
-            self.ax.set_xlabel("X")
-            self.ax.set_ylabel("Y")
-
-            self.canvas.draw()
-
-        except Exception as e:
-            self.log_message(f"Error displaying results: {str(e)}")
-
-    def show_statistics(self):
-        """Show detection statistics"""
-        if not self.current_results:
-            messagebox.showwarning("No Results", "No detection results available.")
-            return
-
-        try:
-            # Create statistics window
-            stats_window = tk.Toplevel(self.root)
-            stats_window.title("Detection Statistics")
-            stats_window.geometry("600x500")
-            stats_window.transient(self.root)
-
-            # Create text widget with scrollbar
-            frame = ttk.Frame(stats_window)
-            frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-            stats_text = scrolledtext.ScrolledText(frame, wrap=tk.WORD)
-            stats_text.pack(fill=tk.BOTH, expand=True)
-
-            # Generate statistics
-            stats_info = "=== HESSIAN BLOB DETECTION STATISTICS ===\n\n"
-
-            total_particles = 0
-            all_strengths = []
-            all_areas = []
-            all_volumes = []
-
-            for filename, results in self.current_results.items():
-                info = results['info']
-                num_particles = results['num_particles']
-                threshold = results['threshold']
-
-                stats_info += f"Image: {filename}\n"
-                stats_info += f"  Particles Found: {num_particles}\n"
-                stats_info += f"  Threshold Used: {threshold:.6f}\n"
-
-                if info.data.shape[0] > 0:
-                    strengths = info.data[:, 4] if info.data.shape[1] > 4 else []
-                    areas = info.data[:, 7] if info.data.shape[1] > 7 else []
-                    volumes = info.data[:, 8] if info.data.shape[1] > 8 else []
-
-                    if len(strengths) > 0:
-                        stats_info += f"  Blob Strength - Mean: {np.mean(strengths):.6f}, Std: {np.std(strengths):.6f}\n"
-                        all_strengths.extend(strengths)
-
-                    if len(areas) > 0 and np.any(np.array(areas) != 1):
-                        stats_info += f"  Area - Mean: {np.mean(areas):.6e}, Std: {np.std(areas):.6e}\n"
-                        all_areas.extend(areas)
-
-                    if len(volumes) > 0 and np.any(np.array(volumes) != 1):
-                        stats_info += f"  Volume - Mean: {np.mean(volumes):.6e}, Std: {np.std(volumes):.6e}\n"
-                        all_volumes.extend(volumes)
-
-                stats_info += "\n"
-                total_particles += num_particles
-
-            # Overall statistics
-            stats_info += f"=== OVERALL STATISTICS ===\n"
-            stats_info += f"Total Images Processed: {len(self.current_results)}\n"
-            stats_info += f"Total Particles Found: {total_particles}\n"
-            stats_info += f"Average Particles per Image: {total_particles / len(self.current_results):.2f}\n\n"
-
-            if all_strengths:
-                stats_info += f"All Blob Strengths:\n"
-                stats_info += f"  Mean: {np.mean(all_strengths):.6f}\n"
-                stats_info += f"  Std Dev: {np.std(all_strengths):.6f}\n"
-                stats_info += f"  Min: {np.min(all_strengths):.6f}\n"
-                stats_info += f"  Max: {np.max(all_strengths):.6f}\n"
-
-            if all_areas and np.any(np.array(all_areas) != 1):
-                stats_info += f"\nParticle Areas:\n"
-                stats_info += f"  Mean: {np.mean(all_areas):.6e}\n"
-                stats_info += f"  Std Dev: {np.std(all_areas):.6e}\n"
-                stats_info += f"  Min: {np.min(all_areas):.6e}\n"
-                stats_info += f"  Max: {np.max(all_areas):.6e}\n"
-
-            if all_volumes and np.any(np.array(all_volumes) != 1):
-                stats_info += f"\nParticle Volumes:\n"
-                stats_info += f"  Mean: {np.mean(all_volumes):.6e}\n"
-                stats_info += f"  Std Dev: {np.std(all_volumes):.6e}\n"
-                stats_info += f"  Min: {np.min(all_volumes):.6e}\n"
-                stats_info += f"  Max: {np.max(all_volumes):.6e}\n"
-
-            stats_text.insert(tk.END, stats_info)
-            stats_text.config(state=tk.DISABLED)
-
-        except Exception as e:
-            error_msg = f"Statistics error: {str(e)}"
-            self.log_message(error_msg)
-            messagebox.showerror("Statistics Error", error_msg)
-
-    # === UTILITY METHODS ===
-
-    def preprocess_images(self):
-        """Preprocess all loaded images"""
-        if not self.current_images:
-            messagebox.showwarning("No Images", "Please load images first.")
-            return
-
-        try:
-            # Run batch preprocessing
             BatchPreprocess()
-            self.log_message("Preprocessing completed.")
         except Exception as e:
             self.log_message(f"Preprocessing error: {str(e)}")
+            messagebox.showinfo("Preprocessing",
+                                "Preprocessing functionality not fully implemented yet.")
+
+    def show_statistics(self):
+        """Show particle statistics"""
+        if not self.current_display_image or self.current_display_image not in self.current_results:
+            messagebox.showwarning("No Results", "Please run blob detection first.")
+            return
+
+        results = self.current_results[self.current_display_image]
+        if results['num_particles'] == 0:
+            messagebox.showinfo("Statistics", "No particles found.")
+            return
+
+        # Calculate and display statistics
+        info = results['info']
+        ParticleStatistics(info)
+
+    def show_particle_viewer(self):
+        """Show particle viewer"""
+        if not self.current_display_image or self.current_display_image not in self.current_results:
+            messagebox.showwarning("No Results", "Please run blob detection first.")
+            return
+
+        results = self.current_results[self.current_display_image]
+        wave = self.current_images[self.current_display_image]
+
+        # Show particle viewer
+        ShowParticleViewer(wave, results['info'])
 
     def save_results(self):
-        """Save detection results to file"""
+        """Save current results"""
         if not self.current_results:
             messagebox.showwarning("No Results", "No results to save.")
             return
 
-        file_path = filedialog.asksaveasfilename(
+        filename = filedialog.asksaveasfilename(
             title="Save Results",
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")]
+            defaultextension=".npz",
+            filetypes=[("NumPy Archive", "*.npz"), ("All files", "*.*")]
         )
 
-        if file_path:
+        if filename:
             try:
-                with open(file_path, 'w') as f:
-                    f.write("Hessian Blob Detection Results\n")
-                    f.write("=" * 40 + "\n\n")
-
-                    for filename, results in self.current_results.items():
-                        info = results['info']
-                        f.write(f"Image: {filename}\n")
-                        f.write(f"Particles: {results['num_particles']}\n")
-                        f.write(f"Threshold: {results['threshold']:.6f}\n")
-
-                        if info.data.shape[0] > 0:
-                            f.write("Particle Data:\n")
-                            f.write("ID\tX\tY\tScale\tStrength\tMaxValue\n")
-                            for i in range(info.data.shape[0]):
-                                x, y = info.data[i, 0], info.data[i, 1]
-                                scale = info.data[i, 2] if info.data.shape[1] > 2 else 0
-                                strength = info.data[i, 4] if info.data.shape[1] > 4 else 0
-                                max_val = info.data[i, 5] if info.data.shape[1] > 5 else 0
-                                f.write(f"{i + 1}\t{x:.4f}\t{y:.4f}\t{scale:.2f}\t{strength:.6f}\t{max_val:.4f}\n")
-
-                        f.write("\n")
-
-                self.log_message(f"Results saved to: {file_path}")
-
+                # Save all results
+                np.savez(filename, **self.current_results)
+                self.log_message(f"Results saved to {filename}")
+                messagebox.showinfo("Success", "Results saved successfully.")
             except Exception as e:
                 self.log_message(f"Error saving results: {str(e)}")
+                messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
 
-    def run_testing(self):
-        """Run the testing function"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Testing Function")
-        dialog.geometry("300x150")
-        dialog.transient(self.root)
-        dialog.grab_set()
+    def zoom_in(self):
+        """Zoom in on the image"""
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
 
-        tk.Label(dialog, text="Enter a string:").pack(pady=5)
-        string_var = tk.StringVar(value="Test string")
-        tk.Entry(dialog, textvariable=string_var, width=30).pack(pady=5)
+        x_center = (xlim[0] + xlim[1]) / 2
+        y_center = (ylim[0] + ylim[1]) / 2
+        x_range = (xlim[1] - xlim[0]) / 2
+        y_range = (ylim[1] - ylim[0]) / 2
 
-        tk.Label(dialog, text="Enter a number:").pack(pady=5)
-        number_var = tk.DoubleVar(value=42.0)
-        tk.Entry(dialog, textvariable=number_var, width=30).pack(pady=5)
+        self.ax.set_xlim(x_center - x_range * 0.7, x_center + x_range * 0.7)
+        self.ax.set_ylim(y_center - y_range * 0.7, y_center + y_range * 0.7)
+        self.canvas.draw()
 
-        def run_test():
-            try:
-                Testing(string_var.get(), number_var.get())
-                dialog.destroy()
-                self.log_message(f"Testing function executed: '{string_var.get()}', {number_var.get()}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Testing function failed: {str(e)}")
+    def zoom_out(self):
+        """Zoom out on the image"""
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
 
-        tk.Button(dialog, text="Run Test", command=run_test).pack(pady=10)
+        x_center = (xlim[0] + xlim[1]) / 2
+        y_center = (ylim[0] + ylim[1]) / 2
+        x_range = (xlim[1] - xlim[0]) / 2
+        y_range = (ylim[1] - ylim[0]) / 2
+
+        self.ax.set_xlim(x_center - x_range * 1.3, x_center + x_range * 1.3)
+        self.ax.set_ylim(y_center - y_range * 1.3, y_center + y_range * 1.3)
+        self.canvas.draw()
+
+    def reset_view(self):
+        """Reset the view to show the entire image"""
+        if self.current_display_image:
+            wave = self.current_images[self.current_display_image]
+            self.ax.set_xlim(DimOffset(wave, 0),
+                             DimOffset(wave, 0) + wave.data.shape[1] * DimDelta(wave, 0))
+            self.ax.set_ylim(DimOffset(wave, 1),
+                             DimOffset(wave, 1) + wave.data.shape[0] * DimDelta(wave, 1))
+            self.canvas.draw()
+
+    def toggle_overlay(self):
+        """Toggle between image only and image with overlay"""
+        if self.current_display_image:
+            if self.current_display_image in self.current_results:
+                # Check if overlay is currently shown
+                if len(self.ax.patches) > 0:
+                    # Remove overlay
+                    self.display_image(self.current_images[self.current_display_image])
+                else:
+                    # Add overlay
+                    self.display_image_with_overlay()
+            else:
+                self.display_image(self.current_images[self.current_display_image])
+
+    def clear_log(self):
+        """Clear the log window"""
+        self.log_text.delete(1.0, tk.END)
 
     def show_about(self):
         """Show about dialog"""
         about_text = """Hessian Blob Particle Detection Suite
-
 Python Port of Igor Pro Implementation
 
-Original Igor Pro Code:
+Original Igor Pro code by:
+Brendan Marsh - marshbp@stanford.edu
+
+G.M. King Laboratory
+University of Missouri-Columbia
+
 Copyright 2019 by The Curators of the University of Missouri
-G.M. King Laboratory - University of Missouri-Columbia
-Coded by: Brendan Marsh (marshbp@stanford.edu)
 
-Python Port maintains 1-1 functionality with the original Igor Pro version.
-
-The Hessian blob algorithm is a general-purpose particle detection algorithm,
-designed to detect, isolate, and draw the boundaries of roughly "blob-like" 
-particles in an image.
-
-Reference:
-"The Hessian Blob Algorithm: Precise Particle Detection in Atomic Force 
-Microscopy Imagery" - Scientific Reports
-doi:10.1038/s41598-018-19379-x
-"""
+This is a complete 1-to-1 port of the Igor Pro
+Hessian Blob detection algorithm, maintaining
+all original functionality and behavior."""
 
         messagebox.showinfo("About", about_text)
 
+    def show_tutorial(self):
+        """Show tutorial information"""
+        tutorial_text = """Hessian Blob Detection Tutorial
+
+1. Load Image(s):
+   - Use File menu or buttons to load images
+   - Supports TIFF, PNG, JPEG, and Igor Binary Wave formats
+
+2. Run Detection:
+   - Click "Run Hessian Blob Detection"
+   - Set parameters in the dialog
+   - Use -2 for interactive threshold selection
+
+3. Interactive Threshold:
+   - Adjust slider to change detection threshold
+   - Red circles show detected blobs
+   - Click Accept when satisfied
+
+4. View Results:
+   - Results tab shows statistics
+   - Toggle overlay to show/hide detected blobs
+   - Use View menu for additional displays
+
+For detailed information, see the original paper:
+"The Hessian Blob Algorithm: Precise Particle Detection
+in Atomic Force Microscopy Imagery" - Scientific Reports"""
+
+        messagebox.showinfo("Tutorial", tutorial_text)
+
 
 def main():
-    """Main entry point"""
+    """Main entry point for GUI application"""
     root = tk.Tk()
     app = HessianBlobGUI(root)
     root.mainloop()
