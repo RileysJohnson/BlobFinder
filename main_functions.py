@@ -157,16 +157,24 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     # Maxes = Sqrt(Maxes) // Put it into image units
     maxes_data = np.sqrt(np.maximum(maxes_wave.data, 0))
 
-    max_value = np.max(maxes_data)
-    if max_value == 0:
+    # Filter out zero values for a more meaningful range
+    non_zero_maxes = maxes_data[maxes_data > 0]
+    if len(non_zero_maxes) == 0:
         messagebox.showwarning("No Blobs", "No suitable blob candidates found in image.")
         return 0.0
 
-    print(f"Max detector response: {max_value}")
+    # Determine a sensible range for the slider
+    min_val = np.min(non_zero_maxes)
+    max_val = np.max(non_zero_maxes)
+    # Set a reasonable upper bound to avoid extreme values dominating the slider
+    # Using the 98th percentile is a good heuristic to exclude outliers
+    robust_max = np.percentile(non_zero_maxes, 98) if len(non_zero_maxes) > 50 else max_val
+
+    print(f"Detector response range: min={min_val:.4f}, max={max_val:.4f}, robust_max={robust_max:.4f}")
 
     class ThresholdWindow:
         def __init__(self):
-            self.threshold = max_value / 2.0  # SS_THRESH = WaveMax(Maxes)/2
+            self.threshold = robust_max / 2.0  # Start at a sensible middle point
             self.accepted = False
             self.root = None
             self.fig = None
@@ -175,62 +183,53 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
             self.circles = []  # Keep track of circles for clearing
 
         def create_window(self):
-            """Create the interactive threshold window matching Igor Pro exactly"""
+            """Create the interactive threshold window"""
             self.root = tk.Tk()
             self.root.title("Interactive Blob Strength")
-            self.root.geometry("1000x700")  # FIXED: Increased size
+            self.root.geometry("1000x700")
 
-            # Create main frame
             main_frame = ttk.Frame(self.root)
             main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-            # Left frame for image
             left_frame = ttk.Frame(main_frame)
             left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-            # Right frame for controls (matching Igor Pro layout)
-            right_frame = ttk.Frame(main_frame, width=200)
+            right_frame = ttk.Frame(main_frame, width=220)
             right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
             right_frame.pack_propagate(False)
 
-            # Controls section
-            controls_label = ttk.Label(right_frame, text="Continue Button", font=('TkDefaultFont', 10, 'bold'))
+            controls_label = ttk.Label(right_frame, text="Controls", font=('TkDefaultFont', 10, 'bold'))
             controls_label.pack(pady=(10, 5))
 
-            # Accept and Quit buttons (side by side like Igor)
             button_frame = ttk.Frame(right_frame)
             button_frame.pack(fill=tk.X, padx=5)
+            ttk.Button(button_frame, text="Accept", command=self.on_accept).pack(side=tk.LEFT, expand=True, fill=tk.X)
+            ttk.Button(button_frame, text="Quit", command=self.on_quit).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-            ttk.Button(button_frame, text="Accept", command=self.on_accept).pack(side=tk.LEFT, padx=(0, 2))
-            ttk.Button(button_frame, text="Quit", command=self.on_quit).pack(side=tk.LEFT)
-
-            # Threshold entry (SetVariable in Igor)
-            self.threshold_var = tk.DoubleVar(value=self.threshold)
             threshold_frame = ttk.Frame(right_frame)
-            threshold_frame.pack(fill=tk.X, padx=5, pady=(10, 5))
-
-            ttk.Label(threshold_frame, text="Blob Strength").pack()
+            threshold_frame.pack(fill=tk.X, padx=5, pady=(15, 5))
+            ttk.Label(threshold_frame, text="Blob Strength Threshold:").pack()
+            self.threshold_var = tk.DoubleVar(value=self.threshold)
             threshold_entry = ttk.Entry(threshold_frame, textvariable=self.threshold_var, width=15)
             threshold_entry.pack(pady=2)
             threshold_entry.bind('<Return>', self.on_entry_change)
             threshold_entry.bind('<FocusOut>', self.on_entry_change)
 
-            # Vertical slider (like Igor Pro ThreshSlide)
             slider_frame = ttk.Frame(right_frame)
-            slider_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
+            slider_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
             self.slider_var = tk.DoubleVar(value=self.threshold)
+            # Use the robust_max for the slider range for better usability
             slider = tk.Scale(slider_frame,
-                              from_=max_value * 1.1,
-                              to=0,
-                              resolution=max_value * 1.1 / 200,  # matches Igor: WaveMax(Maxes)*1.1/200
+                              from_=robust_max * 1.05,
+                              to=min_val * 0.95,
+                              resolution=-1,  # Auto-resolution
                               orient=tk.VERTICAL,
                               variable=self.slider_var,
                               command=self.on_slider_change,
-                              length=400)
+                              length=400,
+                              digits=4)
             slider.pack(fill=tk.BOTH, expand=True)
 
-            # Create matplotlib figure for image display
             self.fig, self.ax = plt.subplots(figsize=(6, 6))
             self.canvas = FigureCanvasTkAgg(self.fig, left_frame)
             self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -476,6 +475,51 @@ def FindHessianBlobs(im, detH, LG, minResponse, mapNum, mapLG, mapMax, info, par
 
     print(f"Found {particle_count} particles above threshold")
     return particle_count
+
+
+def ShowOtsuResults(im, detH, LG, particleType, maxCurvatureRatio, threshold):
+    """
+    Display the results of Otsu's thresholding in a new window.
+    """
+    # Create a new window to display the results
+    window = tk.Toplevel()
+    window.title("Otsu's Threshold Results")
+    window.geometry("800x600")
+
+    fig = Figure(figsize=(8, 6), dpi=100)
+    ax = fig.add_subplot(111)
+    canvas = FigureCanvasTkAgg(fig, master=window)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    # Display the image
+    ax.imshow(im.data, cmap='gray', origin='lower',
+              extent=[DimOffset(im, 0), DimOffset(im, 0) + DimSize(im, 0) * DimDelta(im, 0),
+                      DimOffset(im, 1), DimOffset(im, 1) + DimSize(im, 1) * DimDelta(im, 1)])
+    ax.set_title(f"Otsu's Threshold: {threshold:.4f}")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+
+    # Find and draw blobs
+    SS_MAXMAP = Duplicate(im, "SS_MAXMAP_OTSU")
+    SS_MAXMAP.data = np.full(im.data.shape, -1.0)
+    SS_MAXSCALEMAP = Duplicate(SS_MAXMAP, "SS_MAXSCALEMAP_OTSU")
+
+    Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
+
+    threshold_squared = threshold ** 2
+    num_particles = 0
+    for i in range(DimSize(SS_MAXMAP, 0)):
+        for j in range(DimSize(SS_MAXMAP, 1)):
+            if SS_MAXMAP.data[i, j] > threshold_squared:
+                xc = DimOffset(SS_MAXMAP, 0) + j * DimDelta(SS_MAXMAP, 0)
+                yc = DimOffset(SS_MAXMAP, 1) + i * DimDelta(SS_MAXMAP, 1)
+                rad = SS_MAXSCALEMAP.data[i, j] if SS_MAXSCALEMAP.data[i, j] > 0 else 2.0
+                circle = Circle((xc, yc), rad, fill=False, color='yellow', linewidth=1.5)
+                ax.add_patch(circle)
+                num_particles += 1
+
+    ax.set_title(f"Otsu's Threshold: {threshold:.4f} ({num_particles} particles)")
+    canvas.draw()
 
 
 def HessianBlobDetection(im, scaleStart=1.0, scaleLayers=120, scaleFactor=1.5,

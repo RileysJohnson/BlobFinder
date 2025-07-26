@@ -131,15 +131,8 @@ def MeasureParticles(im, mapNum, info, particleType=1):
 
 def ViewParticles(im, info, mapNum=None):
     """
-    Interactive particle viewer
-    Direct port from Igor Pro ViewParticles function
-
-    Parameters:
-    im : Wave - Original image
-    info : Wave - Particle information array
-    mapNum : Wave - Particle number map (optional)
+    Interactive particle viewer with enhanced zoom and information display.
     """
-
     if info.data.shape[0] == 0:
         messagebox.showinfo("No Particles", "No particles to view.")
         return
@@ -147,218 +140,184 @@ def ViewParticles(im, info, mapNum=None):
     class ParticleViewer:
         def __init__(self, image, particle_info, particle_map=None):
             self.image = image
-            self.info = particle_info
+            self.info = particle_info  # This is a Wave object, we use its .data attribute
             self.map = particle_map
-            self.current_particle = 0
-            self.num_particles = particle_info.data.shape[0]
+            self.current_particle_idx = 0
+            self.num_particles = self.info.data.shape[0]
 
             self.root = tk.Toplevel()
-            self.root.title("Particle Viewer")
-            self.root.geometry("800x600")
+            self.root.title("Interactive Particle Viewer")
+            self.root.geometry("1200x800")
 
             self.setup_ui()
-            self.update_display()
+            self.update_view()
 
         def setup_ui(self):
-            """Setup the particle viewer UI"""
-            # Main frame
-            main_frame = ttk.Frame(self.root, padding="10")
-            main_frame.pack(fill=tk.BOTH, expand=True)
+            # Main layout
+            main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+            main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            # Controls frame
-            controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
-            controls_frame.pack(fill=tk.X, pady=(0, 10))
+            # Left panel for particle list and info
+            left_frame = ttk.Frame(main_paned, width=350)
+            main_paned.add(left_frame, weight=0)
 
-            # Navigation controls
-            nav_frame = ttk.Frame(controls_frame)
-            nav_frame.pack(fill=tk.X)
+            # Right panel for image display
+            right_frame = ttk.Frame(main_paned)
+            main_paned.add(right_frame, weight=1)
 
-            ttk.Button(nav_frame, text="Previous",
-                       command=self.prev_particle).pack(side=tk.LEFT, padx=(0, 5))
-            ttk.Button(nav_frame, text="Next",
-                       command=self.next_particle).pack(side=tk.LEFT, padx=(0, 5))
+            # --- Left Panel ---
+            # Particle list
+            list_frame = ttk.LabelFrame(left_frame, text="Particles", padding=5)
+            list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-            # Particle selection
-            ttk.Label(nav_frame, text="Particle:").pack(side=tk.LEFT, padx=(20, 5))
-            self.particle_var = tk.IntVar(value=0)
-            self.particle_spinbox = ttk.Spinbox(nav_frame, from_=0, to=self.num_particles - 1,
-                                                textvariable=self.particle_var, width=10,
-                                                command=self.on_particle_change)
-            self.particle_spinbox.pack(side=tk.LEFT, padx=(0, 5))
+            self.particle_listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, exportselection=False)
+            for i in range(self.num_particles):
+                self.particle_listbox.insert(tk.END, f"Particle {i}")
+            self.particle_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-            ttk.Label(nav_frame, text=f"of {self.num_particles}").pack(side=tk.LEFT, padx=(0, 20))
+            list_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.particle_listbox.yview)
+            self.particle_listbox.configure(yscrollcommand=list_scrollbar.set)
+            list_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.particle_listbox.bind('<<ListboxSelect>>', self.on_list_select)
 
-            # Delete button
-            ttk.Button(nav_frame, text="Delete Particle",
-                       command=self.delete_particle).pack(side=tk.RIGHT)
-
-            # Display frame
-            display_frame = ttk.LabelFrame(main_frame, text="Particle Display", padding="10")
-            display_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Create matplotlib figure
-            self.fig = Figure(figsize=(8, 6), dpi=100)
-            self.ax = self.fig.add_subplot(111)
-            self.canvas = FigureCanvasTkAgg(self.fig, display_frame)
-            self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-            # Info frame
-            info_frame = ttk.LabelFrame(main_frame, text="Particle Information", padding="10")
-            info_frame.pack(fill=tk.X, pady=(10, 0))
-
-            self.info_text = scrolledtext.ScrolledText(info_frame, height=6, width=80)
+            # Info display
+            info_frame = ttk.LabelFrame(left_frame, text="Particle Details", padding=5)
+            info_frame.pack(fill=tk.X, pady=(5, 0))
+            self.info_text = scrolledtext.ScrolledText(info_frame, height=15, wrap=tk.WORD, state=tk.DISABLED)
             self.info_text.pack(fill=tk.BOTH, expand=True)
 
-        def update_display(self):
-            """Update the particle display"""
-            if self.current_particle >= self.num_particles:
-                self.current_particle = self.num_particles - 1
-            if self.current_particle < 0:
-                self.current_particle = 0
+            # --- Right Panel ---
+            # Controls
+            controls_frame = ttk.Frame(right_frame)
+            controls_frame.pack(fill=tk.X, pady=(0, 5))
+            ttk.Button(controls_frame, text="<< Prev", command=self.prev_particle).pack(side=tk.LEFT, padx=2)
+            ttk.Button(controls_frame, text="Next >>", command=self.next_particle).pack(side=tk.LEFT, padx=2)
+            ttk.Button(controls_frame, text="Delete", command=self.delete_particle).pack(side=tk.RIGHT, padx=2)
 
-            # Update spinbox
-            self.particle_var.set(self.current_particle)
+            # Matplotlib figure for zoomed view
+            self.fig = Figure(figsize=(8, 8), dpi=100)
+            self.ax = self.fig.add_subplot(111)
+            self.canvas = FigureCanvasTkAgg(self.fig, master=right_frame)
+            self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-            # Get particle info
-            p_info = self.info.data[self.current_particle]
-            x_coord = p_info[0]
-            y_coord = p_info[1]
-            scale = p_info[2]
+        def on_list_select(self, event):
+            selection = self.particle_listbox.curselection()
+            if selection:
+                self.current_particle_idx = selection[0]
+                self.update_view()
 
-            # Convert to pixel coordinates
+        def update_view(self):
+            if not (0 <= self.current_particle_idx < self.num_particles):
+                return
+
+            # Update listbox selection
+            self.particle_listbox.selection_clear(0, tk.END)
+            self.particle_listbox.selection_set(self.current_particle_idx)
+            self.particle_listbox.see(self.current_particle_idx)
+
+            # Update particle info display
+            self.update_info_text()
+
+            # Update zoomed image display
+            self.update_image_zoom()
+
+        def update_info_text(self):
+            p_info = self.info.data[self.current_particle_idx]
+
+            info_str = f"--- Particle {self.current_particle_idx} ---\n"
+            info_str += f"Position (X, Y): ({p_info[0]:.2f}, {p_info[1]:.2f})\n"
+            info_str += f"Scale (Radius): {p_info[2]:.3f}\n"
+            info_str += f"DetH Response: {p_info[3]:.4e}\n"
+
+            if self.info.data.shape[1] > 4:
+                info_str += f"Laplacian of Gaussian: {p_info[4]:.4f}\n"
+
+            if self.info.data.shape[1] > 8:
+                info_str += "\n--- Measurements ---\n"
+                info_str += f"Area: {p_info[8]:.2f}\n"
+                info_str += f"Volume: {p_info[9]:.3e}\n"
+                info_str += f"Height: {p_info[10]:.4f}\n"
+
+            self.info_text.config(state=tk.NORMAL)
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(tk.END, info_str)
+            self.info_text.config(state=tk.DISABLED)
+
+        def update_image_zoom(self):
+            p_info = self.info.data[self.current_particle_idx]
+            x_coord, y_coord, scale = p_info[0], p_info[1], p_info[2]
+
             x_pixel = (x_coord - DimOffset(self.image, 0)) / DimDelta(self.image, 0)
             y_pixel = (y_coord - DimOffset(self.image, 1)) / DimDelta(self.image, 1)
 
-            # Define view region (4x the particle scale)
-            view_radius = max(20, int(4 * scale / DimDelta(self.image, 0)))
+            zoom_radius = max(15, int(3 * scale / DimDelta(self.image, 0)))
+            x_min = max(0, int(x_pixel - zoom_radius))
+            x_max = min(self.image.data.shape[1], int(x_pixel + zoom_radius) + 1)
+            y_min = max(0, int(y_pixel - zoom_radius))
+            y_max = min(self.image.data.shape[0], int(y_pixel + zoom_radius) + 1)
 
-            x_min = max(0, int(x_pixel - view_radius))
-            x_max = min(self.image.data.shape[1], int(x_pixel + view_radius))
-            y_min = max(0, int(y_pixel - view_radius))
-            y_max = min(self.image.data.shape[0], int(y_pixel + view_radius))
-
-            # Extract region
             region = self.image.data[y_min:y_max, x_min:x_max]
+            extent = [
+                DimOffset(self.image, 0) + x_min * DimDelta(self.image, 0),
+                DimOffset(self.image, 0) + (x_max - 1) * DimDelta(self.image, 0),
+                DimOffset(self.image, 1) + y_min * DimDelta(self.image, 1),
+                DimOffset(self.image, 1) + (y_max - 1) * DimDelta(self.image, 1)
+            ]
 
-            # Create coordinate arrays for display
-            x_coords = np.arange(x_min, x_max) * DimDelta(self.image, 0) + DimOffset(self.image, 0)
-            y_coords = np.arange(y_min, y_max) * DimDelta(self.image, 1) + DimOffset(self.image, 1)
-
-            extent = [x_coords[0], x_coords[-1], y_coords[-1], y_coords[0]]
-
-            # Clear and plot
             self.ax.clear()
-            self.ax.imshow(region, extent=extent, cmap='gray', aspect='auto')
+            self.ax.imshow(region, cmap='gray', origin='lower', extent=extent, aspect='equal')
 
-            # Draw particle circle
-            circle = Circle((x_coord, y_coord), scale, fill=False, color='red', linewidth=2)
+            # Draw circle for the blob
+            circle = Circle((x_coord, y_coord), scale, fill=False, color='yellow', linewidth=1.5)
             self.ax.add_patch(circle)
 
             # Mark center
-            self.ax.plot(x_coord, y_coord, 'r+', markersize=10, markeredgewidth=2)
+            self.ax.plot(x_coord, y_coord, 'r+', markersize=12, markeredgewidth=1.5)
 
-            # Mark center of mass if available
-            if self.info.data.shape[1] > 11:
-                com_x = p_info[11]
-                com_y = p_info[12]
-                self.ax.plot(com_x, com_y, 'bx', markersize=8, markeredgewidth=2)
-
-            self.ax.set_title(f"Particle {self.current_particle}")
-            self.ax.set_xlabel("X (pixels)")
-            self.ax.set_ylabel("Y (pixels)")
-
+            self.ax.set_title(f"Zoomed View: Particle {self.current_particle_idx}")
+            self.ax.set_xlabel("X Coordinate")
+            self.ax.set_ylabel("Y Coordinate")
+            self.ax.grid(True, linestyle='--', alpha=0.5)
             self.canvas.draw()
 
-            # Update info text
-            self.update_info_text()
-
-        def update_info_text(self):
-            """Update the information text"""
-            self.info_text.delete(1.0, tk.END)
-
-            p_info = self.info.data[self.current_particle]
-
-            info_str = f"Particle {self.current_particle}\n"
-            info_str += "=" * 40 + "\n\n"
-            info_str += f"Position:\n"
-            info_str += f"  X: {p_info[0]:.3f} pixels\n"
-            info_str += f"  Y: {p_info[1]:.3f} pixels\n"
-            info_str += f"  Scale: {p_info[2]:.3f} pixels\n\n"
-
-            info_str += f"Detection Response:\n"
-            info_str += f"  DetH: {p_info[3]:.6f}\n"
-            info_str += f"  LaplacianG: {p_info[4]:.6f}\n\n"
-
-            if self.info.data.shape[1] > 8:
-                info_str += f"Measurements:\n"
-                info_str += f"  Area: {p_info[8]:.3f}\n"
-                info_str += f"  Volume: {p_info[9]:.3f}\n"
-                info_str += f"  Height: {p_info[10]:.6f}\n\n"
-
-                if self.info.data.shape[1] > 11:
-                    info_str += f"Center of Mass:\n"
-                    info_str += f"  COM X: {p_info[11]:.3f} pixels\n"
-                    info_str += f"  COM Y: {p_info[12]:.3f} pixels\n"
-
-            self.info_text.insert(1.0, info_str)
+        def next_particle(self):
+            if self.current_particle_idx < self.num_particles - 1:
+                self.current_particle_idx += 1
+                self.update_view()
 
         def prev_particle(self):
-            """Go to previous particle"""
-            if self.current_particle > 0:
-                self.current_particle -= 1
-                self.update_display()
-
-        def next_particle(self):
-            """Go to next particle"""
-            if self.current_particle < self.num_particles - 1:
-                self.current_particle += 1
-                self.update_display()
-
-        def on_particle_change(self):
-            """Handle particle selection change"""
-            try:
-                new_particle = self.particle_var.get()
-                if 0 <= new_particle < self.num_particles:
-                    self.current_particle = new_particle
-                    self.update_display()
-            except:
-                pass
+            if self.current_particle_idx > 0:
+                self.current_particle_idx -= 1
+                self.update_view()
 
         def delete_particle(self):
-            """Delete current particle"""
             if self.num_particles == 0:
                 return
 
-            result = messagebox.askyesno("Delete Particle",
-                                         f"Delete particle {self.current_particle}?")
-            if result:
-                # Remove from info array
-                self.info.data = np.delete(self.info.data, self.current_particle, axis=0)
-                self.num_particles -= 1
+            if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete Particle {self.current_particle_idx}?"):
+                # Remove from info wave
+                self.info.data = np.delete(self.info.data, self.current_particle_idx, axis=0)
 
-                # Update map if provided
-                if self.map is not None:
-                    # Set deleted particle locations to -1
-                    self.map.data[self.map.data == self.current_particle] = -1
-                    # Renumber remaining particles
-                    for i in range(self.current_particle, self.num_particles):
-                        self.map.data[self.map.data == i + 1] = i
+                # Update particle count
+                old_num_particles = self.num_particles
+                self.num_particles = self.info.data.shape[0]
 
-                # Update display
+                # Re-populate the listbox
+                self.particle_listbox.delete(0, tk.END)
+                for i in range(self.num_particles):
+                    self.particle_listbox.insert(tk.END, f"Particle {i}")
+
                 if self.num_particles == 0:
-                    messagebox.showinfo("No Particles", "No more particles to view.")
+                    messagebox.showinfo("Empty", "All particles have been deleted.")
                     self.root.destroy()
                     return
 
-                if self.current_particle >= self.num_particles:
-                    self.current_particle = self.num_particles - 1
+                # Adjust current index if we deleted the last one
+                if self.current_particle_idx >= self.num_particles:
+                    self.current_particle_idx = self.num_particles - 1
 
-                # Update spinbox range
-                self.particle_spinbox.config(to=self.num_particles - 1)
+                self.update_view()
 
-                self.update_display()
-
-    # Launch the particle viewer
     viewer = ParticleViewer(im, info, mapNum)
 
 

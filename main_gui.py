@@ -49,6 +49,7 @@ class HessianBlobGUI:
         self.current_figure = None
         self.current_canvas = None
         self.current_colorbar = None
+        self.show_blobs_var = tk.BooleanVar(value=True)
 
         self.setup_ui()
         self.setup_menu()
@@ -121,7 +122,19 @@ class HessianBlobGUI:
         # === RIGHT PANEL ===
 
         # Image display area
-        self.image_frame = ttk.Frame(right_frame)
+        image_display_frame = ttk.Frame(right_frame)
+        image_display_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Add a checkbox for toggling blob visibility
+        toggle_blobs_check = ttk.Checkbutton(
+            image_display_frame,
+            text="Show Detected Blobs",
+            variable=self.show_blobs_var,
+            command=self.on_toggle_blobs
+        )
+        toggle_blobs_check.pack(anchor=tk.NE, padx=5, pady=2)
+
+        self.image_frame = ttk.Frame(image_display_frame)
         self.image_frame.pack(fill=tk.BOTH, expand=True)
 
         # Status and log
@@ -148,6 +161,7 @@ class HessianBlobGUI:
         analysis_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Analysis", menu=analysis_menu)
         analysis_menu.add_command(label="Hessian Blob Detection", command=self.run_blob_detection)
+        analysis_menu.add_command(label="View Particles", command=self.view_particles)
         analysis_menu.add_command(label="Preprocessing", command=self.run_preprocessing)
         analysis_menu.add_command(label="Image Statistics", command=self.show_statistics)
 
@@ -237,39 +251,36 @@ class HessianBlobGUI:
             messagebox.showerror("Error", f"Error loading {filename}: {str(e)}")
             return False
 
+    def on_toggle_blobs(self):
+        """Handle toggling of blob visibility."""
+        if self.current_canvas:
+            self.display_results_overlay()
+
     def on_image_select(self, event):
         """Handle image selection from listbox"""
         selection = self.images_listbox.curselection()
         if not selection:
             return
 
-        # Get selected image
         selected_name = self.images_listbox.get(selection[0])
         self.current_display_image = self.current_images.get(selected_name)
 
         if self.current_display_image:
             self.log_message(f"Selected image: {selected_name}")
+            self.current_display_results = self.current_results.get(selected_name)
             self.display_image(self.current_display_image)
 
-            # Check if we have results for this image
-            if selected_name in self.current_results:
-                self.current_display_results = self.current_results[selected_name]
-                self.display_results_overlay()
-
-    def display_image(self, image_wave, show_results=False):
+    def display_image(self, image_wave):
         """
-        Display an image with proper aspect ratio and cleared colorbars
-        FIXED: Now properly clears previous display and maintains aspect ratio
+        Display an image, and if results are available, overlay them.
         """
-        # Clear any existing display
-        for widget in self.image_frame.winfo_children():
-            widget.destroy()
+        if self.current_canvas:
+            self.current_canvas.get_tk_widget().destroy()
+            plt.close(self.current_figure)
 
-        # Create new figure with proper settings
         self.current_figure = Figure(figsize=(8, 6), dpi=100)
         ax = self.current_figure.add_subplot(111)
 
-        # Display image with proper scaling and aspect ratio
         extent = [
             DimOffset(image_wave, 0),
             DimOffset(image_wave, 0) + DimSize(image_wave, 0) * DimDelta(image_wave, 0),
@@ -277,55 +288,57 @@ class HessianBlobGUI:
             DimOffset(image_wave, 1) + DimSize(image_wave, 1) * DimDelta(image_wave, 1)
         ]
 
-        im = ax.imshow(image_wave.data, cmap='gray', origin='lower',
-                      extent=extent, aspect='equal')  # FIXED: aspect='equal' prevents stretching
-
-        ax.set_title(f"{image_wave.name}")
+        im = ax.imshow(image_wave.data, cmap='gray', origin='lower', extent=extent, aspect='equal')
+        ax.set_title(image_wave.name)
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
 
-        # Add colorbar to new figure (this clears any previous colorbar)
+        if self.current_colorbar:
+            self.current_colorbar.remove()
         self.current_colorbar = self.current_figure.colorbar(im, ax=ax)
 
-        # Create new canvas
         self.current_canvas = FigureCanvasTkAgg(self.current_figure, self.image_frame)
-        self.current_canvas.draw()
         self.current_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Display results if available and requested
-        if show_results and self.current_display_results:
-            self.display_results_overlay()
+        self.display_results_overlay()
+        self.current_canvas.draw()
 
     def display_results_overlay(self):
-        """Display blob detection results as overlay circles"""
-        if not self.current_display_results or not self.current_figure:
+        """Display or hide blob detection results based on the toggle."""
+        if not self.current_figure:
             return
 
-        results = self.current_display_results
         ax = self.current_figure.axes[0]
-
-        # Clear any existing patches (circles)
-        patches_to_remove = [p for p in ax.patches if isinstance(p, Circle)]
-        for patch in patches_to_remove:
+        # Remove only circles previously added by this function
+        for patch in self.get_blob_patches(ax):
             patch.remove()
 
-        # Draw circles for detected blobs
-        if 'info' in results and len(results['info'].data) > 0:
-            info_data = results['info'].data
-            num_particles = len(info_data)
+        show_blobs = self.show_blobs_var.get()
+        if show_blobs and self.current_display_results:
+            results = self.current_display_results
+            if 'info' in results and len(results['info'].data) > 0:
+                info_data = results['info'].data
+                num_particles = len(info_data)
 
-            for i in range(num_particles):
-                x_pos = info_data[i, 0]  # X position
-                y_pos = info_data[i, 1]  # Y position
-                # Use scale from info or default radius
-                radius = info_data[i, 3] if info_data.shape[1] > 3 else 3.0
+                for i in range(num_particles):
+                    x_pos = info_data[i, 0]
+                    y_pos = info_data[i, 1]
+                    radius = info_data[i, 2] if info_data.shape[1] > 2 else 3.0
+                    circle = Circle((x_pos, y_pos), radius, fill=False, color='red', linewidth=1.5,
+                                    picker=True, gid=f'blob_{i}')
+                    ax.add_patch(circle)
 
-                circle = Circle((x_pos, y_pos), radius, fill=False, color='red', linewidth=2)
-                ax.add_patch(circle)
+                ax.set_title(f"{self.current_display_image.name} - {num_particles} particles detected")
+            else:
+                ax.set_title(self.current_display_image.name)
+        else:
+            ax.set_title(self.current_display_image.name if self.current_display_image else "")
 
-            ax.set_title(f"{self.current_display_image.name} - {num_particles} particles detected")
+        self.current_canvas.draw_idle()
 
-        self.current_canvas.draw()
+    def get_blob_patches(self, ax):
+        """Helper to get only blob-related patches."""
+        return [p for p in ax.patches if isinstance(p, Circle) and p.get_gid() and p.get_gid().startswith('blob_')]
 
     def run_blob_detection(self):
         """Run blob detection on selected image"""
@@ -364,7 +377,7 @@ class HessianBlobGUI:
                 self.log_message(f"Detection complete! Found {results['num_particles']} particles.")
 
                 # Update display with results
-                self.display_image(self.current_display_image, show_results=True)
+                self.display_image(self.current_display_image)
 
             else:
                 self.log_message("Detection cancelled or failed.")
@@ -372,6 +385,19 @@ class HessianBlobGUI:
         except Exception as e:
             self.log_message(f"Error in blob detection: {str(e)}")
             messagebox.showerror("Error", f"Error in blob detection: {str(e)}")
+
+    def view_particles(self):
+        """Launch the particle viewer for the current image and results."""
+        if self.current_display_image is None or self.current_display_results is None:
+            messagebox.showwarning("No Results", "Please run blob detection on an image first.")
+            return
+
+        try:
+            # The ViewParticles function is in the particle_measurements module
+            ViewParticles(self.current_display_image, self.current_display_results['info'])
+        except Exception as e:
+            self.log_message(f"Error opening particle viewer: {str(e)}")
+            messagebox.showerror("Error", f"Could not open particle viewer: {e}")
 
     def run_preprocessing(self):
         """Run preprocessing on selected image"""
