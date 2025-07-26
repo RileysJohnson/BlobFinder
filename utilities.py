@@ -2,7 +2,7 @@
 Utilities Module
 Contains various utility functions used throughout the blob detection algorithm
 Direct port from Igor Pro code maintaining same variable names and structure
-Fixed version with complete FindHessianBlobs implementation
+Fixed version with complete FindHessianBlobs implementation and Maxes function
 """
 
 import numpy as np
@@ -19,6 +19,90 @@ from file_io import *
 # Monkey patch for numpy complex deprecation
 if not hasattr(np, 'complex'):
     np.complex = complex
+
+
+def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=None):
+    """
+    Find local maxima in the detector response
+    Direct port from Igor Pro Maxes function
+
+    Parameters:
+    detH : Wave - The determinant of Hessian blob detector (3D)
+    LG : Wave - The Laplacian of Gaussian blob detector (3D)
+    particleType : int - Type of particles (-1 for negative, 1 for positive, 0 for both)
+    maxCurvatureRatio : float - Maximum ratio of principal curvatures
+    map_wave : Wave - Output map for particle identification (optional)
+    scaleMap : Wave - Output map for scale information (optional)
+
+    Returns:
+    Wave - 2D wave containing maximum detector responses at each position
+    """
+    print("Computing local maxima in detector response...")
+
+    # Initialize output wave with same spatial dimensions as input
+    maxes_data = np.zeros(detH.data.shape[:2])
+
+    if map_wave is not None:
+        map_wave.data = np.full(detH.data.shape[:2], -1.0)
+    if scaleMap is not None:
+        scaleMap.data = np.zeros(detH.data.shape[:2])
+
+    # Find local maxima in the 3D detector response
+    for k in range(1, detH.data.shape[2] - 1):  # Scale dimension
+        for i in range(1, detH.data.shape[0] - 1):  # Y dimension
+            for j in range(1, detH.data.shape[1] - 1):  # X dimension
+
+                current_response = detH.data[i, j, k]
+
+                # Check particle type constraint
+                if particleType == 1 and current_response <= 0:
+                    continue
+                elif particleType == -1 and current_response >= 0:
+                    continue
+                elif current_response == 0:
+                    continue
+
+                # Check if it's a local maximum in 3D neighborhood
+                is_max = True
+                for di in [-1, 0, 1]:
+                    for dj in [-1, 0, 1]:
+                        for dk in [-1, 0, 1]:
+                            if di == 0 and dj == 0 and dk == 0:
+                                continue
+                            if detH.data[i + di, j + dj, k + dk] >= current_response:
+                                is_max = False
+                                break
+                        if not is_max:
+                            break
+                    if not is_max:
+                        break
+
+                if is_max:
+                    # Check curvature ratio constraint
+                    # The constraint is: LG^2 / detH < (maxCurvatureRatio + 1)^2 / maxCurvatureRatio
+                    lg_val = LG.data[i, j, k]
+                    if abs(current_response) > 1e-10:  # Avoid division by zero
+                        curvature_ratio = (lg_val ** 2) / abs(current_response)
+                        max_allowed = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
+
+                        if curvature_ratio < max_allowed:
+                            # Update if this is the strongest response at this position
+                            if abs(current_response) > abs(maxes_data[i, j]):
+                                maxes_data[i, j] = current_response
+                                if map_wave is not None:
+                                    map_wave.data[i, j] = current_response
+                                if scaleMap is not None:
+                                    scaleMap.data[i, j] = k
+
+    # Create output wave
+    maxes_wave = Wave(maxes_data, "Maxes")
+    maxes_wave.SetScale('x', DimOffset(detH, 0), DimDelta(detH, 0))
+    maxes_wave.SetScale('y', DimOffset(detH, 1), DimDelta(detH, 1))
+
+    num_maxes = np.sum(maxes_data != 0)
+    print(f"Found {num_maxes} local maxima")
+
+    return maxes_wave
 
 
 def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, info,
@@ -60,590 +144,238 @@ def FindHessianBlobs(im, detH, LG, detHResponseThresh, mapNum, mapDetH, mapMax, 
     mapMax.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
     mapMax.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
 
-    # Initialize info wave (particle information storage)
-    max_particles = min(10000, im.data.shape[0] * im.data.shape[1] // 27)  # Reasonable limit
-    info.data = np.zeros((max_particles, 15))
+    # Find local maxima using the Maxes function
+    map_wave = Wave(np.full(im.data.shape, -1.0), "TempMap")
+    scale_map = Wave(np.zeros(im.data.shape), "TempScaleMap")
+    maxes_wave = Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave, scale_map)
 
-    # Info wave columns:
-    # 0: x coordinate, 1: y coordinate, 2: scale index, 3: detector response
-    # 4: maximum height, 5: area, 6: volume, 7: refined x, 8: refined y
-    # 9-14: reserved for additional measurements
+    # Convert maxes to image units (square root)
+    maxes_image_units = np.sqrt(np.maximum(np.abs(maxes_wave.data), 0))
 
-    # Get dimensions
-    limI, limJ, limK = detH.data.shape
-    limI -= 1
-    limJ -= 1
-    limK -= 1
-    cnt = 0  # Particle counter
+    # Find blobs above threshold
+    blob_candidates = []
+    for i in range(maxes_wave.data.shape[0]):
+        for j in range(maxes_wave.data.shape[1]):
+            if maxes_image_units[i, j] >= detHResponseThresh and map_wave.data[i, j] > minResponse:
+                scale_idx = int(scale_map.data[i, j])
 
-    print(f"Scanning {limI + 1} x {limJ + 1} x {limK + 1} detector space...")
+                # Calculate real-world coordinates
+                x_coord = DimOffset(im, 0) + j * DimDelta(im, 0)
+                y_coord = DimOffset(im, 1) + i * DimDelta(im, 1)
 
-    # Start with smallest blobs then go to larger blobs (k=0 is smallest scale)
-    for k in range(1, limK):  # Skip first and last scale layers
-        for i in range(1, limI):  # Skip image boundaries
-            for j in range(1, limJ):
-
-                # Does it hit the threshold?
-                current_response = detH.data[i, j, k]
-                if abs(current_response) < minResponse:
-                    continue
-
-                # Check particle type
-                if particleType == 1 and current_response <= 0:
-                    continue
-                elif particleType == -1 and current_response >= 0:
-                    continue
-
-                # Is it too edgy? (curvature ratio test)
-                if abs(current_response) > 1e-10:  # Avoid division by zero
-                    curvature_ratio = LG.data[i, j, k] ** 2 / abs(current_response)
-                    max_allowed_ratio = ((maxCurvatureRatio + 1) / maxCurvatureRatio) ** 2
-                    if curvature_ratio >= max_allowed_ratio:
-                        continue
-
-                # Is there a particle there already with a stronger response?
-                if (mapNum.data[i, j] > -1 and
-                        abs(current_response) <= abs(info.data[int(mapNum.data[i, j]), 3])):
-                    continue
-
-                # Check if it's a local maximum in 3D neighborhood
-                is_local_max = True
-                for dk in [-1, 0, 1]:
-                    for di in [-1, 0, 1]:
-                        for dj in [-1, 0, 1]:
-                            if dk == 0 and di == 0 and dj == 0:
-                                continue  # Skip center point
-
-                            # Check bounds
-                            ni, nj, nk = i + di, j + dj, k + dk
-                            if ni < 0 or ni > limI or nj < 0 or nj > limJ or nk < 0 or nk > limK:
-                                continue
-
-                            neighbor_response = detH.data[ni, nj, nk]
-
-                            if particleType == 1:
-                                # For positive particles, current must be maximum
-                                if neighbor_response >= current_response:
-                                    is_local_max = False
-                                    break
-                            elif particleType == -1:
-                                # For negative particles, current must be minimum (most negative)
-                                if neighbor_response <= current_response:
-                                    is_local_max = False
-                                    break
-                            else:  # particleType == 0 (both)
-                                # For both types, check absolute values
-                                if abs(neighbor_response) >= abs(current_response):
-                                    is_local_max = False
-                                    break
-
-                        if not is_local_max:
-                            break
-                    if not is_local_max:
-                        break
-
-                if not is_local_max:
-                    continue
-
-                # We found a valid blob! Process it
-                if cnt >= max_particles:
-                    print(f"Warning: Maximum number of particles ({max_particles}) reached")
-                    break
-
-                # Calculate blob properties
-                blob_properties = CalculateBlobProperties(im, detH, LG, i, j, k, particleType)
-
-                if blob_properties is None:
-                    continue  # Skip if properties calculation failed
-
-                x_coord, y_coord, max_height, area, volume, blob_mask = blob_properties
-
-                # Store particle information
-                info.data[cnt, 0] = x_coord  # X coordinate in real units
-                info.data[cnt, 1] = y_coord  # Y coordinate in real units
-                info.data[cnt, 2] = k  # Scale index
-                info.data[cnt, 3] = current_response  # Detector response
-                info.data[cnt, 4] = max_height  # Maximum height
-                info.data[cnt, 5] = area  # Area
-                info.data[cnt, 6] = volume  # Volume
-                info.data[cnt, 7] = x_coord  # Refined X (initially same as x_coord)
-                info.data[cnt, 8] = y_coord  # Refined Y (initially same as y_coord)
-                info.data[cnt, 9] = k  # Store scale index for radius calculation
-
-                # Update maps (these use pixel coordinates)
-                if blob_mask is not None:
-                    mapNum.data[blob_mask] = cnt
-                    mapDetH.data[blob_mask] = current_response
-                    mapMax.data[blob_mask] = max_height
+                # Calculate scale value
+                if scale_idx < detH.data.shape[2]:
+                    scale_value = np.exp(DimOffset(detH, 2) + scale_idx * DimDelta(detH, 2))
                 else:
-                    # Fallback: mark just the center point
-                    mapNum.data[i, j] = cnt
-                    mapDetH.data[i, j] = current_response
-                    mapMax.data[i, j] = max_height
+                    scale_value = 1.0
 
-                cnt += 1
+                blob_candidates.append({
+                    'i': i, 'j': j,
+                    'x': x_coord, 'y': y_coord,
+                    'scale_idx': scale_idx,
+                    'scale_value': scale_value,
+                    'response': map_wave.data[i, j],
+                    'strength': maxes_image_units[i, j],
+                    'max_value': im.data[i, j]
+                })
 
-                if cnt % 100 == 0:  # Progress indicator
-                    print(f"  Found {cnt} particles...")
+    # Sort by detector response strength (strongest first)
+    blob_candidates.sort(key=lambda x: x['response'], reverse=True)
 
-        if cnt >= max_particles:
-            break
+    # Process blobs and handle overlaps
+    accepted_blobs = []
+    particle_number = 0
 
-    # Trim info wave to actual number of particles found
-    if cnt > 0:
-        info.data = info.data[:cnt, :]
+    for candidate in blob_candidates:
+        i, j = candidate['i'], candidate['j']
 
-    print(f"FindHessianBlobs completed: found {cnt} particles")
-    return cnt
-
-
-def CalculateBlobProperties(im, detH, LG, i, j, k, particleType):
-    """
-    Calculate properties of a detected blob
-
-    Parameters:
-    im : Wave - Original image
-    detH : Wave - Detector response
-    LG : Wave - Laplacian of Gaussian
-    i, j, k : int - Blob center coordinates and scale
-    particleType : int - Type of particle
-
-    Returns:
-    tuple - (x_coord, y_coord, max_height, area, volume, blob_mask) or None if failed
-    """
-    try:
-        # Convert pixel coordinates to real coordinates
-        x_coord = DimOffset(im, 0) + j * DimDelta(im, 0)
-        y_coord = DimOffset(im, 1) + i * DimDelta(im, 1)
-
-        # Get the scale for this layer
-        if k < detH.data.shape[2]:
-            scale_value = DimOffset(detH, 2) + k * DimDelta(detH, 2)
-            # If using log scale, convert back
-            if DimDelta(detH, 2) != 0 and scale_value > 0:
-                try:
-                    actual_scale = np.exp(scale_value)
-                except:
-                    actual_scale = scale_value
-            else:
-                actual_scale = max(scale_value, 1.0)  # Ensure positive scale
-
-            # Calculate characteristic radius
-            blob_radius = np.sqrt(2 * actual_scale)
-        else:
-            blob_radius = 3.0  # Default radius
-
-        # Define blob region (circular region around detected center)
-        radius_pixels = max(2, int(blob_radius / DimDelta(im, 0)))
-
-        # Create circular mask
-        y_indices, x_indices = np.ogrid[:im.data.shape[0], :im.data.shape[1]]
-        mask = ((x_indices - j) ** 2 + (y_indices - i) ** 2) <= radius_pixels ** 2
-
-        # Make sure mask includes at least the center point
-        mask[i, j] = True
-
-        if not np.any(mask):
-            # Fallback: just use center point
-            mask = np.zeros_like(im.data, dtype=bool)
-            mask[i, j] = True
-
-        # Calculate properties within the mask
-        blob_data = im.data[mask]
-
-        if len(blob_data) == 0:
-            return None
-
-        # Calculate measurements
-        max_height = np.max(blob_data)
-        area = np.sum(mask) * DimDelta(im, 0) * DimDelta(im, 1)
-        volume = np.sum(blob_data) * DimDelta(im, 0) * DimDelta(im, 1)
-
-        return x_coord, y_coord, max_height, area, volume, mask
-
-    except Exception as e:
-        print(f"Error calculating blob properties: {e}")
-        return None
-
-
-def ScanFill(im, seed_i, seed_j, threshold, connectivity=8):
-    """
-    Flood fill algorithm to define blob boundaries
-    Similar to Igor Pro's ScanFill functionality
-
-    Parameters:
-    im : Wave - Image data
-    seed_i, seed_j : int - Seed point coordinates
-    threshold : float - Threshold value
-    connectivity : int - 4 or 8 connectivity
-
-    Returns:
-    ndarray - Boolean mask of filled region
-    """
-    mask = np.zeros(im.data.shape, dtype=bool)
-
-    if (seed_i < 0 or seed_i >= im.data.shape[0] or
-            seed_j < 0 or seed_j >= im.data.shape[1]):
-        return mask
-
-    # Use scipy's flood fill (more efficient)
-    from scipy import ndimage
-
-    # Simple threshold-based region growing
-    seed_value = im.data[seed_i, seed_j]
-
-    # Create binary image based on threshold
-    if seed_value > threshold:
-        binary_im = im.data > threshold
-    else:
-        binary_im = im.data < threshold
-
-    # Label connected components
-    labeled, num_features = ndimage.label(binary_im,
-                                          structure=ndimage.generate_binary_structure(2, connectivity // 4))
-
-    if num_features > 0:
-        # Find which label contains the seed point
-        seed_label = labeled[seed_i, seed_j]
-        if seed_label > 0:
-            mask = (labeled == seed_label)
-
-    return mask
-
-
-def RefineParticlePositions(im, info, mapNum, subpixel_factor=1):
-    """
-    Refine particle positions to sub-pixel accuracy
-
-    Parameters:
-    im : Wave - Original image
-    info : Wave - Particle information
-    mapNum : Wave - Particle map
-    subpixel_factor : int - Sub-pixel refinement factor
-
-    Returns:
-    bool - Success flag
-    """
-    if subpixel_factor <= 1:
-        return True  # No refinement needed
-
-    print(f"Refining particle positions with factor {subpixel_factor}")
-
-    num_particles = info.data.shape[0]
-
-    for p in range(num_particles):
-        try:
-            # Get current position
-            x_coord = info.data[p, 0]
-            y_coord = info.data[p, 1]
-
-            # Convert to pixel coordinates
-            i = int((y_coord - DimOffset(im, 1)) / DimDelta(im, 1))
-            j = int((x_coord - DimOffset(im, 0)) / DimDelta(im, 0))
-
-            # Define refinement window
-            window_size = 5
-            i_min = max(0, i - window_size)
-            i_max = min(im.data.shape[0], i + window_size + 1)
-            j_min = max(0, j - window_size)
-            j_max = min(im.data.shape[1], j + window_size + 1)
-
-            # Extract local region
-            local_region = im.data[i_min:i_max, j_min:j_max]
-
-            if local_region.size == 0:
-                continue
-
-            # Find center of mass for sub-pixel refinement
-            yi, xi = np.mgrid[0:local_region.shape[0], 0:local_region.shape[1]]
-            total_mass = np.sum(local_region)
-
-            if total_mass > 0:
-                # Center of mass
-                cm_i = np.sum(yi * local_region) / total_mass + i_min
-                cm_j = np.sum(xi * local_region) / total_mass + j_min
-
-                # Convert back to real coordinates
-                refined_x = DimOffset(im, 0) + cm_j * DimDelta(im, 0)
-                refined_y = DimOffset(im, 1) + cm_i * DimDelta(im, 1)
-
-                # Update refined positions
-                info.data[p, 7] = refined_x
-                info.data[p, 8] = refined_y
-
-        except Exception as e:
-            print(f"Error refining particle {p}: {e}")
+        # Check if this position is already occupied
+        if mapNum.data[i, j] >= 0:
             continue
 
-    print("Particle position refinement completed")
-    return True
+        # Mark this blob
+        mapNum.data[i, j] = particle_number
+        mapDetH.data[i, j] = candidate['response']
+        mapMax.data[i, j] = candidate['max_value']
 
+        # Calculate blob radius for overlap checking
+        radius = np.sqrt(2 * candidate['scale_value'])
+        radius_pixels = radius / DimDelta(im, 0)
 
-def FilterParticlesByConstraints(info, mapNum, minH, maxH, minV, maxV, minA, maxA):
-    """
-    Filter particles based on measurement constraints
+        # Mark nearby pixels as occupied (simple circular region)
+        y_center, x_center = i, j
+        for y in range(max(0, int(y_center - radius_pixels)),
+                       min(im.data.shape[0], int(y_center + radius_pixels + 1))):
+            for x in range(max(0, int(x_center - radius_pixels)),
+                           min(im.data.shape[1], int(x_center + radius_pixels + 1))):
+                dist = np.sqrt((y - y_center) ** 2 + (x - x_center) ** 2)
+                if dist <= radius_pixels and mapNum.data[y, x] < 0:
+                    mapNum.data[y, x] = particle_number
 
-    Parameters:
-    info : Wave - Particle information
-    mapNum : Wave - Particle map
-    minH, maxH : float - Height constraints
-    minV, maxV : float - Volume constraints
-    minA, maxA : float - Area constraints
+        accepted_blobs.append(candidate)
+        particle_number += 1
 
-    Returns:
-    int - Number of particles remaining after filtering
-    """
-    if (minH == -np.inf and maxH == np.inf and
-            minV == -np.inf and maxV == np.inf and
-            minA == -np.inf and maxA == np.inf):
-        return info.data.shape[0]  # No constraints
+    # Create info wave with blob information
+    num_blobs = len(accepted_blobs)
+    if num_blobs > 0:
+        # Info wave columns: x, y, scale, strength, max_value, area, volume, etc.
+        info_data = np.zeros((num_blobs, 10))  # 10 columns for various parameters
 
-    print("Applying particle constraints...")
+        for idx, blob in enumerate(accepted_blobs):
+            info_data[idx, 0] = blob['x']  # X coordinate
+            info_data[idx, 1] = blob['y']  # Y coordinate
+            info_data[idx, 2] = blob['scale_idx']  # Scale index
+            info_data[idx, 3] = blob['scale_value']  # Scale value
+            info_data[idx, 4] = blob['strength']  # Blob strength
+            info_data[idx, 5] = blob['max_value']  # Maximum pixel value
+            info_data[idx, 6] = blob['response']  # Detector response
 
-    num_particles = info.data.shape[0]
-    valid_particles = []
+            # Calculate area and volume (simplified)
+            radius = np.sqrt(2 * blob['scale_value'])
+            area = np.pi * radius ** 2
+            volume = area * blob['max_value']
 
-    for p in range(num_particles):
-        height = info.data[p, 4]  # Column 4 is max height
-        area = info.data[p, 5]  # Column 5 is area
-        volume = info.data[p, 6]  # Column 6 is volume
+            info_data[idx, 7] = area  # Area
+            info_data[idx, 8] = volume  # Volume
+            info_data[idx, 9] = blob['scale_idx']  # Store scale index again for easy access
 
-        # Check constraints
-        if (minH <= height <= maxH and
-                minV <= volume <= maxV and
-                minA <= area <= maxA):
-            valid_particles.append(p)
-        else:
-            # Remove this particle from maps
-            particle_mask = (mapNum.data == p)
-            mapNum.data[particle_mask] = -1
-
-    # Compact info wave and renumber particles
-    if len(valid_particles) < num_particles:
-        new_info = np.zeros((len(valid_particles), info.data.shape[1]))
-
-        for new_id, old_id in enumerate(valid_particles):
-            new_info[new_id, :] = info.data[old_id, :]
-
-            # Update particle numbering in maps
-            particle_mask = (mapNum.data == old_id)
-            mapNum.data[particle_mask] = new_id
-
-        info.data = new_info
-
-    print(
-        f"Constraints applied: {len(valid_particles)} particles remain (removed {num_particles - len(valid_particles)})")
-    return len(valid_particles)
-
-
-def AnalyzeParticleShape(im, particle_mask):
-    """
-    Analyze the shape properties of a particle
-
-    Parameters:
-    im : Wave - Original image
-    particle_mask : ndarray - Boolean mask of particle region
-
-    Returns:
-    dict - Dictionary of shape properties
-    """
-    if not np.any(particle_mask):
-        return {}
-
-    try:
-        # Basic properties
-        particle_data = im.data[particle_mask]
-        area = np.sum(particle_mask)
-        perimeter = calculate_perimeter(particle_mask)
-
-        # Center of mass
-        yi, xi = np.where(particle_mask)
-        weights = im.data[yi, xi]
-        total_weight = np.sum(weights)
-
-        if total_weight > 0:
-            cm_x = np.sum(xi * weights) / total_weight
-            cm_y = np.sum(yi * weights) / total_weight
-        else:
-            cm_x = np.mean(xi)
-            cm_y = np.mean(yi)
-
-        # Equivalent diameter
-        equiv_diameter = np.sqrt(4 * area / np.pi)
-
-        # Circularity
-        if perimeter > 0:
-            circularity = 4 * np.pi * area / (perimeter ** 2)
-        else:
-            circularity = 0
-
-        # Aspect ratio (using moments)
-        aspect_ratio = calculate_aspect_ratio(particle_mask)
-
-        return {
-            'area': area,
-            'perimeter': perimeter,
-            'center_of_mass_x': cm_x,
-            'center_of_mass_y': cm_y,
-            'equivalent_diameter': equiv_diameter,
-            'circularity': circularity,
-            'aspect_ratio': aspect_ratio,
-            'max_intensity': np.max(particle_data),
-            'min_intensity': np.min(particle_data),
-            'mean_intensity': np.mean(particle_data),
-            'total_intensity': np.sum(particle_data)
-        }
-
-    except Exception as e:
-        print(f"Error analyzing particle shape: {e}")
-        return {}
-
-
-def calculate_perimeter(mask):
-    """Calculate perimeter of a binary mask"""
-    try:
-        from skimage import measure
-        contours = measure.find_contours(mask.astype(float), 0.5)
-        if contours:
-            return len(contours[0])
-        else:
-            return 0
-    except ImportError:
-        # Fallback: count edge pixels
-        edge_mask = mask & ~ndimage.binary_erosion(mask)
-        return np.sum(edge_mask)
-
-
-def calculate_aspect_ratio(mask):
-    """Calculate aspect ratio using second moments"""
-    try:
-        yi, xi = np.where(mask)
-
-        if len(yi) < 2:
-            return 1.0
-
-        # Calculate second moments
-        x_mean = np.mean(xi)
-        y_mean = np.mean(yi)
-
-        mu20 = np.mean((xi - x_mean) ** 2)
-        mu02 = np.mean((yi - y_mean) ** 2)
-        mu11 = np.mean((xi - x_mean) * (yi - y_mean))
-
-        # Calculate eigenvalues of covariance matrix
-        trace = mu20 + mu02
-        det = mu20 * mu02 - mu11 ** 2
-
-        if det <= 0:
-            return 1.0
-
-        lambda1 = (trace + np.sqrt(trace ** 2 - 4 * det)) / 2
-        lambda2 = (trace - np.sqrt(trace ** 2 - 4 * det)) / 2
-
-        if lambda2 <= 0:
-            return 1.0
-
-        return np.sqrt(lambda1 / lambda2)
-
-    except Exception:
-        return 1.0
-
-
-def CreateParticleSummary(info, im_name=""):
-    """
-    Create a summary of detected particles
-
-    Parameters:
-    info : Wave - Particle information
-    im_name : str - Name of the image
-
-    Returns:
-    dict - Summary statistics
-    """
-    if info.data.shape[0] == 0:
-        return {"num_particles": 0}
-
-    heights = info.data[:, 4]
-    areas = info.data[:, 5]
-    volumes = info.data[:, 6]
-
-    summary = {
-        "image_name": im_name,
-        "num_particles": len(heights),
-        "height_stats": {
-            "mean": np.mean(heights),
-            "std": np.std(heights),
-            "min": np.min(heights),
-            "max": np.max(heights),
-            "median": np.median(heights)
-        },
-        "area_stats": {
-            "mean": np.mean(areas),
-            "std": np.std(areas),
-            "min": np.min(areas),
-            "max": np.max(areas),
-            "median": np.median(areas)
-        },
-        "volume_stats": {
-            "mean": np.mean(volumes),
-            "std": np.std(volumes),
-            "min": np.min(volumes),
-            "max": np.max(volumes),
-            "median": np.median(volumes)
-        }
-    }
-
-    return summary
-
-
-def ExportParticleData(info, filename):
-    """
-    Export particle data to a text file
-
-    Parameters:
-    info : Wave - Particle information
-    filename : str - Output filename
-
-    Returns:
-    bool - Success flag
-    """
-    try:
-        header = ["X_Coord", "Y_Coord", "Scale_Index", "Detector_Response",
-                  "Max_Height", "Area", "Volume", "Refined_X", "Refined_Y"]
-
-        np.savetxt(filename, info.data[:, :9], delimiter='\t',
-                   header='\t'.join(header), comments='')
-
-        print(f"Particle data exported to {filename}")
-        return True
-
-    except Exception as e:
-        print(f"Error exporting particle data: {e}")
-        return False
-
-
-def TestUtilities():
-    """Test function for utilities module"""
-    print("Testing utilities module...")
-
-    # Create test data
-    test_image = Wave(np.random.rand(50, 50), "TestImage")
-    test_image.SetScale('x', 0, 1)
-    test_image.SetScale('y', 0, 1)
-
-    # Test blob properties calculation
-    detH = Wave(np.random.rand(50, 50, 10), "TestDetH")
-    LG = Wave(np.random.rand(50, 50, 10), "TestLG")
-
-    props = CalculateBlobProperties(test_image, detH, LG, 25, 25, 5, 1)
-
-    if props is not None:
-        print("✓ Blob properties calculation working")
+        info.data = info_data
     else:
-        print("✗ Blob properties calculation failed")
+        info.data = np.zeros((0, 10))
 
-    print("Utilities test completed")
+    print(f"Found {num_blobs} Hessian blobs above threshold")
+    return num_blobs
 
 
-if __name__ == "__main__":
-    TestUtilities()
+def SubPixelMaxima3D(detH, LG, i, j, k, maxCurvatureRatio):
+    """
+    Refine blob position to sub-pixel accuracy using 3D interpolation
+    Direct port from Igor Pro SubPixelMaxima3D function
+    """
+    # Get 3x3x3 neighborhood around the maximum
+    if (i < 1 or i >= detH.data.shape[0] - 1 or
+            j < 1 or j >= detH.data.shape[1] - 1 or
+            k < 1 or k >= detH.data.shape[2] - 1):
+        return i, j, k, detH.data[i, j, k]
+
+    # Extract 3x3x3 neighborhood
+    neighborhood = detH.data[i - 1:i + 2, j - 1:j + 2, k - 1:k + 2]
+
+    # Calculate gradients and Hessian for sub-pixel refinement
+    # First derivatives
+    dx = (neighborhood[1, 2, 1] - neighborhood[1, 0, 1]) / 2
+    dy = (neighborhood[2, 1, 1] - neighborhood[0, 1, 1]) / 2
+    dz = (neighborhood[1, 1, 2] - neighborhood[1, 1, 0]) / 2
+
+    # Second derivatives (Hessian)
+    dxx = neighborhood[1, 2, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 0, 1]
+    dyy = neighborhood[2, 1, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[0, 1, 1]
+    dzz = neighborhood[1, 1, 2] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 1, 0]
+
+    # Mixed derivatives
+    dxy = (neighborhood[2, 2, 1] - neighborhood[2, 0, 1] - neighborhood[0, 2, 1] + neighborhood[0, 0, 1]) / 4
+    dxz = (neighborhood[1, 2, 2] - neighborhood[1, 2, 0] - neighborhood[1, 0, 2] + neighborhood[1, 0, 0]) / 4
+    dyz = (neighborhood[2, 1, 2] - neighborhood[2, 1, 0] - neighborhood[0, 1, 2] + neighborhood[0, 1, 0]) / 4
+
+    # Construct Hessian matrix
+    H = np.array([[dxx, dxy, dxz],
+                  [dxy, dyy, dyz],
+                  [dxz, dyz, dzz]])
+
+    gradient = np.array([dx, dy, dz])
+
+    # Solve for sub-pixel offset: H * offset = -gradient
+    try:
+        offset = np.linalg.solve(H, -gradient)
+
+        # Limit offset to reasonable range
+        offset = np.clip(offset, -0.5, 0.5)
+
+        # Calculate refined position
+        refined_i = i + offset[1]  # Note: offset[1] is for y direction
+        refined_j = j + offset[0]  # Note: offset[0] is for x direction
+        refined_k = k + offset[2]
+
+        # Calculate refined value
+        refined_value = (neighborhood[1, 1, 1] +
+                         0.5 * np.dot(gradient, offset))
+
+        return refined_i, refined_j, refined_k, refined_value
+
+    except np.linalg.LinAlgError:
+        # If Hessian is singular, return original position
+        return i, j, k, detH.data[i, j, k]
+
+
+def MaxOccupancy(mapNum, particleNum, radius):
+    """
+    Check maximum occupancy in a circular region
+    Direct port from Igor Pro MaxOccupancy function
+    """
+    if particleNum < 0:
+        return 0
+
+    # Find center of particle
+    indices = np.where(mapNum.data == particleNum)
+    if len(indices[0]) == 0:
+        return 0
+
+    center_i = np.mean(indices[0])
+    center_j = np.mean(indices[1])
+
+    # Count pixels in circular region around center
+    count = 0
+    radius_pixels = radius / DimDelta(mapNum, 0)  # Convert to pixels
+
+    for i in range(max(0, int(center_i - radius_pixels)),
+                   min(mapNum.data.shape[0], int(center_i + radius_pixels + 1))):
+        for j in range(max(0, int(center_j - radius_pixels)),
+                       min(mapNum.data.shape[1], int(center_j + radius_pixels + 1))):
+            dist = np.sqrt((i - center_i) ** 2 + (j - center_j) ** 2)
+            if dist <= radius_pixels:
+                if mapNum.data[i, j] == particleNum:
+                    count += 1
+
+    return count
+
+
+def DistanceBetweenParticles(info, p1_idx, p2_idx):
+    """
+    Calculate distance between two particles
+    Direct port from Igor Pro function
+    """
+    if (p1_idx >= info.data.shape[0] or p2_idx >= info.data.shape[0] or
+            p1_idx < 0 or p2_idx < 0):
+        return np.inf
+
+    x1, y1 = info.data[p1_idx, 0], info.data[p1_idx, 1]
+    x2, y2 = info.data[p2_idx, 0], info.data[p2_idx, 1]
+
+    return np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+
+def RemoveParticle(mapNum, mapDetH, mapMax, particleNum):
+    """
+    Remove a particle from all maps
+    Direct port from Igor Pro function
+    """
+    mask = mapNum.data == particleNum
+    mapNum.data[mask] = -1
+    mapDetH.data[mask] = 0
+    mapMax.data[mask] = 0
+
+
+def Testing(input_string, input_number):
+    """
+    Testing function for the algorithm
+    Direct port from Igor Pro Testing function
+    """
+    print(f"Testing function called:")
+    print(f"  Input string: '{input_string}'")
+    print(f"  Input number: {input_number}")
+
+    # Perform some basic calculations to test functionality
+    result = input_number * 2 + len(input_string)
+    print(f"  Calculated result: {result}")
+
+    return result

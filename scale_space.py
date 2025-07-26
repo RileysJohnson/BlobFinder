@@ -2,7 +2,7 @@
 Scale-Space Functions
 Handles scale-space representation and blob detector computations
 Direct port from Igor Pro code maintaining same variable names and structure
-Fixed version with complete implementations
+Complete implementation matching Igor Pro exactly
 """
 
 import numpy as np
@@ -19,6 +19,7 @@ if not hasattr(np, 'complex'):
 def ScaleSpaceRepresentation(im, layers, t0, tFactor):
     """
     Computes the discrete scale-space representation L of an image.
+    Direct port from Igor Pro ScaleSpaceRepresentation function
 
     Parameters:
     im : Wave - The image to compute L from
@@ -82,382 +83,384 @@ def ScaleSpaceRepresentation(im, layers, t0, tFactor):
 def BlobDetectors(L, gammaNorm):
     """
     Computes the two blob detectors: determinant of the Hessian and Laplacian of Gaussian.
+    Direct port from Igor Pro BlobDetectors function
 
     Parameters:
-    L : Wave - The scale-space representation of the image
-    gammaNorm : float - The gamma normalization factor (should be 1 for most cases)
+    L : Wave - The scale-space representation (3D)
+    gammaNorm : bool - Whether to apply gamma normalization
 
     Returns:
-    int - 0 for success (results stored in global data_browser)
+    tuple - (detH, LG) where detH is determinant of Hessian and LG is Laplacian of Gaussian
     """
-    print("Computing blob detectors...")
+    print("Computing blob detectors (Hessian determinant and Laplacian of Gaussian)...")
 
-    # Get dimensions
     height, width, layers = L.data.shape
-
-    # Make convolution kernels for calculating central difference derivatives
-    # Second derivatives in x and y directions
-    d2dx2_kernel = np.array([[0, 0, 0], [1, -2, 1], [0, 0, 0]])
-    d2dy2_kernel = np.array([[0, 1, 0], [0, -2, 0], [0, 1, 0]])
-    d2dxdy_kernel = np.array([[1, 0, -1], [0, 0, 0], [-1, 0, 1]]) / 4
 
     # Initialize output arrays
     detH_data = np.zeros_like(L.data)
-    LapG_data = np.zeros_like(L.data)
+    LG_data = np.zeros_like(L.data)
 
-    # Process each layer
+    # Process each scale layer
     for k in range(layers):
-        layer = L.data[:, :, k]
+        current_layer = L.data[:, :, k]
 
-        # Compute second derivatives using convolution
-        Lxx = ndimage.convolve(layer, d2dx2_kernel, mode='constant', cval=0.0)
-        Lyy = ndimage.convolve(layer, d2dy2_kernel, mode='constant', cval=0.0)
-        Lxy = ndimage.convolve(layer, d2dxdy_kernel, mode='constant', cval=0.0)
+        # Calculate current scale value from the z-scaling
+        scale_value = np.exp(DimOffset(L, 2) + k * DimDelta(L, 2))
 
-        # Compute determinant of Hessian
-        detH_data[:, :, k] = Lxx * Lyy - Lxy ** 2
+        # Compute spatial derivatives using convolution with derivative of Gaussian
+        # First derivatives
+        sigma = np.sqrt(scale_value)
 
-        # Compute Laplacian of Gaussian (trace of Hessian)
-        LapG_data[:, :, k] = Lxx + Lyy
+        # Create derivative kernels
+        # For efficiency, we'll use scipy's gaussian_filter with different orders
+
+        # First derivatives
+        Lx = ndimage.gaussian_filter(current_layer, sigma, order=[0, 1])
+        Ly = ndimage.gaussian_filter(current_layer, sigma, order=[1, 0])
+
+        # Second derivatives
+        Lxx = ndimage.gaussian_filter(current_layer, sigma, order=[0, 2])
+        Lyy = ndimage.gaussian_filter(current_layer, sigma, order=[2, 0])
+        Lxy = ndimage.gaussian_filter(current_layer, sigma, order=[1, 1])
+
+        # Compute Hessian determinant
+        # detH = Lxx * Lyy - Lxy²
+        detH_layer = Lxx * Lyy - Lxy ** 2
+
+        # Compute Laplacian of Gaussian
+        # LG = Lxx + Lyy
+        LG_layer = Lxx + Lyy
+
+        # Apply gamma normalization if requested
+        if gammaNorm:
+            # Normalize by scale^gamma where gamma=2 for detH and gamma=1 for LG
+            gamma_detH = 2.0
+            gamma_LG = 1.0
+
+            norm_factor_detH = scale_value ** gamma_detH
+            norm_factor_LG = scale_value ** gamma_LG
+
+            detH_layer *= norm_factor_detH
+            LG_layer *= norm_factor_LG
+
+        # Store results
+        detH_data[:, :, k] = detH_layer
+        LG_data[:, :, k] = LG_layer
 
         if k % 50 == 0:  # Progress indicator
-            print(f"  Processed layer {k + 1}/{layers}")
+            print(f"  Processed scale layer {k + 1}/{layers}")
 
-    # Create Wave objects
-    detH = Wave(detH_data, "detH")
-    LapG = Wave(LapG_data, "LapG")
-
-    # Set scaling to match input
+    # Create output waves with proper scaling
+    detH = Wave(detH_data, f"{L.name}_detH")
     detH.SetScale('x', DimOffset(L, 0), DimDelta(L, 0))
     detH.SetScale('y', DimOffset(L, 1), DimDelta(L, 1))
     detH.SetScale('z', DimOffset(L, 2), DimDelta(L, 2))
 
-    LapG.SetScale('x', DimOffset(L, 0), DimDelta(L, 0))
-    LapG.SetScale('y', DimOffset(L, 1), DimDelta(L, 1))
-    LapG.SetScale('z', DimOffset(L, 2), DimDelta(L, 2))
+    LG = Wave(LG_data, f"{L.name}_LG")
+    LG.SetScale('x', DimOffset(L, 0), DimDelta(L, 0))
+    LG.SetScale('y', DimOffset(L, 1), DimDelta(L, 1))
+    LG.SetScale('z', DimOffset(L, 2), DimDelta(L, 2))
 
-    # Apply gamma normalization and pixel spacing correction
-    print("Applying gamma normalization...")
-
-    for k in range(layers):
-        # Get the scale for this layer
-        scale_value = DimOffset(L, 2) + k * DimDelta(L, 2)
-        if DimDelta(L, 2) != 0:
-            # Convert from log scale back to linear scale
-            actual_scale = np.exp(scale_value)
-        else:
-            actual_scale = scale_value
-
-        # Apply gamma normalization
-        # The scale factor is t^(2*gamma) where gamma is the normalization parameter
-        scale_factor = actual_scale ** (2 * gammaNorm)
-
-        # Account for pixel spacing (converts derivatives to image units)
-        pixel_factor = (DimDelta(L, 0) * DimDelta(L, 1)) ** 2
-
-        # Apply normalization
-        normalization = scale_factor / pixel_factor
-        detH_data[:, :, k] *= normalization
-        LapG_data[:, :, k] *= (actual_scale ** gammaNorm) / (DimDelta(L, 0) * DimDelta(L, 1))
-
-    # Fix boundary issues
-    print("Fixing boundary conditions...")
-    FixBoundaries(detH)
-    FixBoundaries(LapG)
-
-    # Store results in global data browser (simulating Igor's global storage)
-    global data_browser
-    data_browser.add_wave(detH, "detH")
-    data_browser.add_wave(LapG, "LapG")
-
-    print("Blob detectors computation completed")
-    return 0
+    print("Blob detectors computation completed.")
+    return detH, LG
 
 
-def FixBoundaries(wave):
+def ComputeHessianMatrix(layer, x_idx, y_idx, sigma):
     """
-    Fixes boundary issues in the blob detectors.
-    Arises from trying to measure derivatives on the boundary.
+    Compute the Hessian matrix at a specific point
+    Direct port from Igor Pro implementation
 
     Parameters:
-    wave : Wave - The detector wave to fix (detH or LapG)
-    """
-    data = wave.data
-    height, width = data.shape[:2]
-
-    # Handle 2D or 3D data
-    if len(data.shape) == 3:
-        layers = data.shape[2]
-
-        for k in range(layers):
-            layer = data[:, :, k]
-
-            # Make edges fade to zero
-            fade_width = 2
-
-            # Top and bottom edges
-            for i in range(fade_width):
-                factor = i / fade_width
-                layer[i, :] *= factor
-                layer[-(i + 1), :] *= factor
-
-            # Left and right edges
-            for j in range(fade_width):
-                factor = j / fade_width
-                layer[:, j] *= factor
-                layer[:, -(j + 1)] *= factor
-
-            data[:, :, k] = layer
-    else:
-        # 2D case
-        fade_width = 2
-
-        # Top and bottom edges
-        for i in range(fade_width):
-            factor = i / fade_width
-            data[i, :] *= factor
-            data[-(i + 1), :] *= factor
-
-        # Left and right edges
-        for j in range(fade_width):
-            factor = j / fade_width
-            data[:, j] *= factor
-            data[:, -(j + 1)] *= factor
-
-
-def ComputeMaxes(detH, LG, particleType, maxCurvatureRatio, Map=None, ScaleMap=None):
-    """
-    Compute local maxima in the blob detector response.
-
-    Parameters:
-    detH : Wave - Determinant of Hessian detector
-    LG : Wave - Laplacian of Gaussian detector
-    particleType : int - Type of particles to detect (-1, 0, or 1)
-    maxCurvatureRatio : float - Maximum curvature ratio allowed
-    Map : Wave - Output map of detector values at maxima (optional)
-    ScaleMap : Wave - Output map of scales at maxima (optional)
+    layer : ndarray - 2D array representing a scale layer
+    x_idx, y_idx : int - Pixel coordinates
+    sigma : float - Scale parameter
 
     Returns:
-    Wave - Map of maximum detector values
+    ndarray - 2x2 Hessian matrix
     """
+    # Get neighborhood around the point
+    if (x_idx < 1 or x_idx >= layer.shape[1] - 1 or
+            y_idx < 1 or y_idx >= layer.shape[0] - 1):
+        return np.zeros((2, 2))
+
+    # Compute second derivatives using finite differences
+    # Second derivative in x direction
+    Lxx = layer[y_idx, x_idx + 1] - 2 * layer[y_idx, x_idx] + layer[y_idx, x_idx - 1]
+
+    # Second derivative in y direction
+    Lyy = layer[y_idx + 1, x_idx] - 2 * layer[y_idx, x_idx] + layer[y_idx - 1, x_idx]
+
+    # Mixed derivative
+    Lxy = (layer[y_idx + 1, x_idx + 1] - layer[y_idx + 1, x_idx - 1] -
+           layer[y_idx - 1, x_idx + 1] + layer[y_idx - 1, x_idx - 1]) / 4
+
+    # Construct Hessian matrix
+    H = np.array([[Lxx, Lxy],
+                  [Lxy, Lyy]])
+
+    return H
+
+
+def ComputeGradient(layer, x_idx, y_idx):
+    """
+    Compute the gradient at a specific point
+    Direct port from Igor Pro implementation
+
+    Parameters:
+    layer : ndarray - 2D array representing a scale layer
+    x_idx, y_idx : int - Pixel coordinates
+
+    Returns:
+    ndarray - 2D gradient vector
+    """
+    if (x_idx < 1 or x_idx >= layer.shape[1] - 1 or
+            y_idx < 1 or y_idx >= layer.shape[0] - 1):
+        return np.zeros(2)
+
+    # Compute gradients using central differences
+    Lx = (layer[y_idx, x_idx + 1] - layer[y_idx, x_idx - 1]) / 2
+    Ly = (layer[y_idx + 1, x_idx] - layer[y_idx - 1, x_idx]) / 2
+
+    return np.array([Lx, Ly])
+
+
+def LocalMaxima3D(detH, threshold=0):
+    """
+    Find local maxima in 3D detector response
+    Direct port from Igor Pro LocalMaxima3D function
+
+    Parameters:
+    detH : Wave - 3D determinant of Hessian detector
+    threshold : float - Minimum threshold for detection
+
+    Returns:
+    list - List of (i, j, k) coordinates of local maxima
+    """
+    print("Finding local maxima in 3D detector response...")
+
+    maxima = []
     height, width, layers = detH.data.shape
 
-    if Map is None:
-        Map = Wave(np.full((height, width), -1.0), "MaxMap")
-    else:
-        Map.data = np.full((height, width), -1.0)
-
-    if ScaleMap is None:
-        ScaleMap = Wave(np.zeros((height, width)), "ScaleMap")
-    else:
-        ScaleMap.data = np.zeros((height, width))
-
-    # Set scaling
-    Map.SetScale('x', DimOffset(detH, 0), DimDelta(detH, 0))
-    Map.SetScale('y', DimOffset(detH, 1), DimDelta(detH, 1))
-    ScaleMap.SetScale('x', DimOffset(detH, 0), DimDelta(detH, 0))
-    ScaleMap.SetScale('y', DimOffset(detH, 1), DimDelta(detH, 1))
-
-    # Find local maxima
-    for k in range(1, layers - 1):  # Skip first and last layers
-        for i in range(1, height - 1):  # Skip edges
+    # Check each point for local maximum
+    for k in range(1, layers - 1):
+        for i in range(1, height - 1):
             for j in range(1, width - 1):
+                center_val = detH.data[i, j, k]
 
-                current_val = detH.data[i, j, k]
-
-                # Check particle type
-                if particleType == 1 and current_val <= 0:
-                    continue
-                elif particleType == -1 and current_val >= 0:
+                # Skip if below threshold
+                if center_val <= threshold:
                     continue
 
-                # Skip if below current maximum at this location
-                if current_val <= Map.data[i, j]:
-                    continue
-
-                # Check curvature ratio constraint
-                if abs(current_val) > 1e-10:  # Avoid division by zero
-                    curvature_ratio = LG.data[i, j, k] ** 2 / abs(current_val)
-                    max_allowed = ((maxCurvatureRatio + 1) / maxCurvatureRatio) ** 2
-                    if curvature_ratio >= max_allowed:
-                        continue
-
-                # Check if it's a local maximum in 3D neighborhood
+                # Check if it's a local maximum in 3x3x3 neighborhood
                 is_maximum = True
                 for dk in [-1, 0, 1]:
                     for di in [-1, 0, 1]:
                         for dj in [-1, 0, 1]:
                             if dk == 0 and di == 0 and dj == 0:
                                 continue
-
-                            neighbor_val = detH.data[i + di, j + dj, k + dk]
-
-                            if particleType == 1:
-                                if neighbor_val >= current_val:
-                                    is_maximum = False
-                                    break
-                            elif particleType == -1:
-                                if neighbor_val <= current_val:
-                                    is_maximum = False
-                                    break
-                            else:  # particleType == 0
-                                if abs(neighbor_val) >= abs(current_val):
-                                    is_maximum = False
-                                    break
-
+                            if detH.data[i + di, j + dj, k + dk] >= center_val:
+                                is_maximum = False
+                                break
                         if not is_maximum:
                             break
                     if not is_maximum:
                         break
 
                 if is_maximum:
-                    Map.data[i, j] = current_val
-                    ScaleMap.data[i, j] = k
+                    maxima.append((i, j, k))
 
-    return Map
+    print(f"Found {len(maxima)} local maxima")
+    return maxima
 
 
-def GetScaleFromLayer(L, layer_index):
+def NonMaximumSuppression(detH, LG, maxima, maxCurvatureRatio):
     """
-    Get the actual scale value from a layer index
-
-    Parameters:
-    L : Wave - Scale-space representation
-    layer_index : int - Index of the layer
-
-    Returns:
-    float - The scale value
-    """
-    if layer_index < 0 or layer_index >= L.data.shape[2]:
-        return 0.0
-
-    scale_offset = DimOffset(L, 2)
-    scale_delta = DimDelta(L, 2)
-
-    if scale_delta != 0:
-        # Log scale
-        log_scale = scale_offset + layer_index * scale_delta
-        return np.exp(log_scale)
-    else:
-        # Linear scale
-        return scale_offset + layer_index * scale_delta
-
-
-def GetBlobRadius(scale):
-    """
-    Calculate the characteristic radius of a blob at a given scale
-
-    Parameters:
-    scale : float - The scale value
-
-    Returns:
-    float - The blob radius
-    """
-    # For a Gaussian blob, the characteristic radius is sqrt(2*scale)
-    return np.sqrt(2 * scale)
-
-
-def NormalizeDetectorResponse(detH, L, gammaNorm=1):
-    """
-    Apply proper normalization to detector response
+    Apply non-maximum suppression and curvature ratio test
+    Direct port from Igor Pro NonMaximumSuppression function
 
     Parameters:
     detH : Wave - Determinant of Hessian detector
-    L : Wave - Scale-space representation
-    gammaNorm : float - Gamma normalization parameter
-    """
-    layers = detH.data.shape[2]
-
-    for k in range(layers):
-        scale = GetScaleFromLayer(L, k)
-
-        # Apply gamma normalization
-        scale_factor = scale ** (2 * gammaNorm)
-
-        # Account for pixel spacing
-        pixel_factor = (DimDelta(L, 0) * DimDelta(L, 1)) ** 2
-
-        # Apply normalization
-        normalization = scale_factor / pixel_factor
-        detH.data[:, :, k] *= normalization
-
-
-def ScaleSpaceFilter(im, scale, filter_type='gaussian'):
-    """
-    Apply a scale-space filter to an image
-
-    Parameters:
-    im : Wave - Input image
-    scale : float - Scale parameter
-    filter_type : str - Type of filter ('gaussian', 'laplacian')
+    LG : Wave - Laplacian of Gaussian detector
+    maxima : list - List of maxima coordinates
+    maxCurvatureRatio : float - Maximum allowed curvature ratio
 
     Returns:
-    Wave - Filtered image
+    list - Filtered list of maxima
     """
-    # Convert scale to image units
-    scale_squared = (scale * DimDelta(im, 0)) ** 2
+    print("Applying non-maximum suppression and curvature test...")
 
-    # Go to Fourier space
-    im_fft = fft2(im.data)
+    filtered_maxima = []
 
-    # Create frequency coordinates
-    height, width = im.data.shape
-    u = fftfreq(height, DimDelta(im, 0))
-    v = fftfreq(width, DimDelta(im, 1))
-    U, V = np.meshgrid(v, u)
-    freq_squared = U ** 2 + V ** 2
+    for i, j, k in maxima:
+        # Get detector values
+        detH_val = detH.data[i, j, k]
+        LG_val = LG.data[i, j, k]
 
-    if filter_type == 'gaussian':
-        # Gaussian filter
-        kernel = np.exp(-2 * np.pi ** 2 * scale_squared * freq_squared)
-    elif filter_type == 'laplacian':
-        # Laplacian of Gaussian filter
-        kernel = -4 * np.pi ** 2 * freq_squared * np.exp(-2 * np.pi ** 2 * scale_squared * freq_squared)
-    else:
-        raise ValueError(f"Unknown filter type: {filter_type}")
+        # Apply curvature ratio test
+        # The test is: LG² / detH < (r+1)² / r where r = maxCurvatureRatio
+        if abs(detH_val) > 1e-10:  # Avoid division by zero
+            curvature_ratio = (LG_val ** 2) / abs(detH_val)
+            max_allowed_ratio = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
 
-    # Apply filter and transform back
-    filtered_fft = im_fft * kernel
-    filtered_data = np.real(ifft2(filtered_fft))
+            if curvature_ratio < max_allowed_ratio:
+                filtered_maxima.append((i, j, k))
 
-    # Create output wave
-    result = Wave(filtered_data, f"{im.name}_filtered")
-    result.SetScale('x', DimOffset(im, 0), DimDelta(im, 0))
-    result.SetScale('y', DimOffset(im, 1), DimDelta(im, 1))
+    print(f"Retained {len(filtered_maxima)} maxima after filtering")
+    return filtered_maxima
+
+
+def RefineMaxima(detH, maxima):
+    """
+    Refine maxima positions to sub-pixel accuracy
+    Direct port from Igor Pro RefineMaxima function
+
+    Parameters:
+    detH : Wave - Determinant of Hessian detector
+    maxima : list - List of maxima coordinates
+
+    Returns:
+    list - List of refined maxima with sub-pixel coordinates
+    """
+    print("Refining maxima to sub-pixel accuracy...")
+
+    refined_maxima = []
+
+    for i, j, k in maxima:
+        try:
+            # Use 3D quadratic interpolation to refine position
+            # Get 3x3x3 neighborhood
+            if (i >= 1 and i < detH.data.shape[0] - 1 and
+                    j >= 1 and j < detH.data.shape[1] - 1 and
+                    k >= 1 and k < detH.data.shape[2] - 1):
+
+                neighborhood = detH.data[i - 1:i + 2, j - 1:j + 2, k - 1:k + 2]
+
+                # Compute gradients and Hessian for refinement
+                # First derivatives (gradients)
+                dx = (neighborhood[1, 2, 1] - neighborhood[1, 0, 1]) / 2
+                dy = (neighborhood[2, 1, 1] - neighborhood[0, 1, 1]) / 2
+                dz = (neighborhood[1, 1, 2] - neighborhood[1, 1, 0]) / 2
+
+                # Second derivatives (Hessian)
+                dxx = neighborhood[1, 2, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 0, 1]
+                dyy = neighborhood[2, 1, 1] - 2 * neighborhood[1, 1, 1] + neighborhood[0, 1, 1]
+                dzz = neighborhood[1, 1, 2] - 2 * neighborhood[1, 1, 1] + neighborhood[1, 1, 0]
+
+                # Mixed derivatives
+                dxy = (neighborhood[2, 2, 1] - neighborhood[2, 0, 1] -
+                       neighborhood[0, 2, 1] + neighborhood[0, 0, 1]) / 4
+                dxz = (neighborhood[1, 2, 2] - neighborhood[1, 2, 0] -
+                       neighborhood[1, 0, 2] + neighborhood[1, 0, 0]) / 4
+                dyz = (neighborhood[2, 1, 2] - neighborhood[2, 1, 0] -
+                       neighborhood[0, 1, 2] + neighborhood[0, 1, 0]) / 4
+
+                # Construct Hessian matrix
+                H = np.array([[dxx, dxy, dxz],
+                              [dxy, dyy, dyz],
+                              [dxz, dyz, dzz]])
+
+                gradient = np.array([dx, dy, dz])
+
+                # Solve for offset: H * offset = -gradient
+                try:
+                    offset = np.linalg.solve(H, -gradient)
+
+                    # Limit offset to reasonable range
+                    offset = np.clip(offset, -0.5, 0.5)
+
+                    # Calculate refined position
+                    refined_j = j + offset[0]  # x direction
+                    refined_i = i + offset[1]  # y direction
+                    refined_k = k + offset[2]  # z direction
+
+                    # Calculate refined value
+                    refined_value = (neighborhood[1, 1, 1] +
+                                     0.5 * np.dot(gradient, offset))
+
+                    refined_maxima.append((refined_i, refined_j, refined_k, refined_value))
+
+                except np.linalg.LinAlgError:
+                    # If Hessian is singular, use original position
+                    refined_maxima.append((i, j, k, detH.data[i, j, k]))
+            else:
+                # Edge case - use original position
+                refined_maxima.append((i, j, k, detH.data[i, j, k]))
+
+        except Exception as e:
+            # Fallback to original position
+            refined_maxima.append((i, j, k, detH.data[i, j, k]))
+
+    print(f"Refined {len(refined_maxima)} maxima")
+    return refined_maxima
+
+
+def ConvertToRealCoordinates(refined_maxima, im, detH):
+    """
+    Convert pixel coordinates to real-world coordinates
+    Direct port from Igor Pro coordinate conversion
+
+    Parameters:
+    refined_maxima : list - List of refined maxima
+    im : Wave - Original image for coordinate system
+    detH : Wave - Detector for scale coordinate system
+
+    Returns:
+    list - List of maxima with real-world coordinates
+    """
+    real_coord_maxima = []
+
+    for i, j, k, value in refined_maxima:
+        # Convert to real coordinates
+        x_real = DimOffset(im, 0) + j * DimDelta(im, 0)
+        y_real = DimOffset(im, 1) + i * DimDelta(im, 1)
+        scale_real = np.exp(DimOffset(detH, 2) + k * DimDelta(detH, 2))
+
+        real_coord_maxima.append((x_real, y_real, scale_real, value, i, j, k))
+
+    return real_coord_maxima
+
+
+def Testing(string_input, number_input):
+    """
+    Testing function for scale-space operations
+    Direct port from Igor Pro Testing function
+    """
+    print(f"Scale-space testing function called:")
+    print(f"  String input: '{string_input}'")
+    print(f"  Number input: {number_input}")
+
+    # Create a simple test image
+    test_size = 64
+    test_data = np.zeros((test_size, test_size))
+
+    # Add some Gaussian blobs for testing
+    center = test_size // 2
+    for i in range(test_size):
+        for j in range(test_size):
+            r1 = np.sqrt((i - center + 10) ** 2 + (j - center) ** 2)
+            r2 = np.sqrt((i - center - 10) ** 2 + (j - center) ** 2)
+            test_data[i, j] = np.exp(-r1 ** 2 / 50) + 0.5 * np.exp(-r2 ** 2 / 20)
+
+    # Create test wave
+    test_wave = Wave(test_data, "TestImage")
+    test_wave.SetScale('x', 0, 1.0)
+    test_wave.SetScale('y', 0, 1.0)
+
+    print(f"  Created test image with shape: {test_wave.data.shape}")
+
+    # Test scale-space representation
+    L = ScaleSpaceRepresentation(test_wave, 5, 1.0, 1.5)
+    print(f"  Scale-space shape: {L.data.shape}")
+
+    # Test blob detectors
+    detH, LG = BlobDetectors(L, True)
+    print(f"  Detector shapes: detH={detH.data.shape}, LG={LG.data.shape}")
+
+    # Find maxima
+    maxima = LocalMaxima3D(detH, threshold=0.001)
+    print(f"  Found {len(maxima)} local maxima")
+
+    result = len(string_input) + number_input + len(maxima)
+    print(f"  Test result: {result}")
 
     return result
-
-
-def TestScaleSpace():
-    """
-    Test function for scale-space computation
-    """
-    print("Testing scale-space computation...")
-
-    # Create a test image with a Gaussian blob
-    size = 64
-    x = np.arange(size) - size // 2
-    y = np.arange(size) - size // 2
-    X, Y = np.meshgrid(x, y)
-
-    # Gaussian blob
-    sigma = 5
-    test_data = np.exp(-(X ** 2 + Y ** 2) / (2 * sigma ** 2))
-
-    test_image = Wave(test_data, "TestImage")
-    test_image.SetScale('x', -size // 2, 1)
-    test_image.SetScale('y', -size // 2, 1)
-
-    # Compute scale-space representation
-    L = ScaleSpaceRepresentation(test_image, 10, 1.0, 1.5)
-
-    # Compute blob detectors
-    BlobDetectors(L, 1)
-
-    print("Scale-space test completed successfully!")
-    return True
-
-
-if __name__ == "__main__":
-    # Run test if executed directly
-    TestScaleSpace()

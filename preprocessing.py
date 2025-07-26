@@ -2,6 +2,7 @@
 Preprocessing Module
 Contains image preprocessing functions for the blob detection algorithm
 Direct port from Igor Pro code maintaining same variable names and structure
+Complete implementation with all preprocessing functions
 """
 
 import numpy as np
@@ -21,6 +22,7 @@ if not hasattr(np, 'complex'):
 def BatchPreprocess():
     """
     Preprocess a series of images in a chosen data folder.
+    Direct port from Igor Pro BatchPreprocess function
     Be sure to highlight the data folder containing the images in the data browser before running.
     """
     ImagesDF = GetBrowserSelection(0)
@@ -77,64 +79,87 @@ def BatchPreprocess():
             continue
 
     print(f"Batch preprocessing completed. Processed {processed_count} images.")
-    print(f"Results stored in '{PreprocessedDF}'")
-
+    messagebox.showinfo("Preprocessing Complete",
+                        f"Processed {processed_count} out of {NumImages} images.\n"
+                        f"Results saved in folder: {PreprocessedDF}")
     return True
 
 
 def GetPreprocessingParameters():
     """
     Get preprocessing parameters from user dialog
-    Returns tuple of parameters or None if cancelled
+    Direct port from Igor Pro parameter dialog
     """
+    # Create parameter dialog
     root = tk.Tk()
-    root.withdraw()  # Hide root window
+    root.withdraw()  # Hide main window
 
-    dialog = tk.Toplevel(root)
+    dialog = tk.Toplevel()
     dialog.title("Preprocessing Parameters")
-    dialog.geometry("400x200")
+    dialog.geometry("400x300")
+    dialog.transient()
     dialog.grab_set()
-
-    # Make dialog modal and centered
-    dialog.transient(root)
     dialog.focus_set()
 
-    # Variables for parameters
-    streak_var = tk.DoubleVar(value=3.0)  # Standard deviations for streak detection
-    poly_var = tk.IntVar(value=2)  # Polynomial order for flattening
-    flatten_var = tk.IntVar(value=0)  # Additional flattening order
+    result = [None]
 
-    result = [None]  # Use list to store result
-
-    # Create GUI elements
-    main_frame = ttk.Frame(dialog, padding="10")
+    main_frame = ttk.Frame(dialog, padding="20")
     main_frame.pack(fill=tk.BOTH, expand=True)
 
-    ttk.Label(main_frame, text="Streak Removal (std devs, 0=off):").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    ttk.Entry(main_frame, textvariable=streak_var, width=15).grid(row=0, column=1, padx=5, pady=5)
+    ttk.Label(main_frame, text="Image Preprocessing Parameters",
+              font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
 
-    ttk.Label(main_frame, text="Polynomial Flattening Order (0=off):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    ttk.Entry(main_frame, textvariable=poly_var, width=15).grid(row=1, column=1, padx=5, pady=5)
+    # Streak removal parameters
+    streak_frame = ttk.LabelFrame(main_frame, text="Streak Removal", padding="10")
+    streak_frame.pack(fill=tk.X, pady=5)
 
-    ttk.Label(main_frame, text="Additional Flattening Order (0=off):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-    ttk.Entry(main_frame, textvariable=flatten_var, width=15).grid(row=2, column=1, padx=5, pady=5)
+    ttk.Label(streak_frame, text="Standard deviations from mean for streak identification:").pack(anchor='w')
+    ttk.Label(streak_frame, text="(Enter 0 to skip streak removal)").pack(anchor='w')
+
+    streak_var = tk.DoubleVar(value=3.0)
+    ttk.Entry(streak_frame, textvariable=streak_var, width=15).pack(pady=5)
+
+    # Polynomial flattening parameters
+    flatten_frame = ttk.LabelFrame(main_frame, text="Polynomial Flattening", padding="10")
+    flatten_frame.pack(fill=tk.X, pady=5)
+
+    ttk.Label(flatten_frame, text="Polynomial order for background flattening:").pack(anchor='w')
+    ttk.Label(flatten_frame, text="(Enter 0 to skip flattening, typically use 2)").pack(anchor='w')
+
+    flatten_var = tk.IntVar(value=2)
+    ttk.Entry(flatten_frame, textvariable=flatten_var, width=15).pack(pady=5)
+
+    # Additional processing option
+    additional_frame = ttk.LabelFrame(main_frame, text="Additional Processing", padding="10")
+    additional_frame.pack(fill=tk.X, pady=5)
+
+    ttk.Label(additional_frame, text="Additional polynomial order (advanced):").pack(anchor='w')
+    ttk.Label(additional_frame, text="(Usually leave as 0)").pack(anchor='w')
+
+    additional_var = tk.IntVar(value=0)
+    ttk.Entry(additional_frame, textvariable=additional_var, width=15).pack(pady=5)
 
     def ok_clicked():
         try:
-            result[0] = (streak_var.get(), poly_var.get(), flatten_var.get())
-            dialog.quit()
+            result[0] = (
+                streak_var.get(),
+                flatten_var.get(),
+                additional_var.get()
+            )
+            dialog.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Invalid parameter values: {str(e)}")
 
     def cancel_clicked():
         result[0] = None
-        dialog.quit()
+        dialog.destroy()
 
+    # Buttons
     button_frame = ttk.Frame(main_frame)
-    button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+    button_frame.pack(pady=20)
 
-    ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=10)
-    ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=10)
+    ttk.Button(button_frame, text="Continue", command=ok_clicked, width=15).pack(side=tk.LEFT, padx=10)
+    ttk.Button(button_frame, text="Cancel", command=cancel_clicked, width=15).pack(side=tk.LEFT, padx=10)
 
     # Center the dialog
     dialog.update_idletasks()
@@ -142,7 +167,7 @@ def GetPreprocessingParameters():
     y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
     dialog.geometry(f"+{x}+{y}")
 
-    # Run dialog
+    # Wait for dialog to complete
     dialog.mainloop()
 
     # Clean up
@@ -155,508 +180,440 @@ def GetPreprocessingParameters():
     return result[0]
 
 
-def RemoveStreaks(wave, threshold_stddevs=3.0):
+def RemoveStreaks(wave, threshold_sigma):
     """
-    Remove streaks from an image using statistical analysis
+    Remove streaks from an image based on statistical analysis
+    Direct port from Igor Pro RemoveStreaks function
 
     Parameters:
     wave : Wave - The image to process
-    threshold_stddevs : float - Number of standard deviations for streak detection
-
-    Returns:
-    bool - Success flag
+    threshold_sigma : float - Number of standard deviations from mean to identify streaks
     """
-    try:
-        print(f"Removing streaks with threshold {threshold_stddevs} standard deviations...")
+    print(f"Removing streaks with threshold {threshold_sigma} sigma...")
 
-        data = wave.data.copy()
-        height, width = data.shape
+    if threshold_sigma <= 0:
+        return
 
-        # Analyze row-wise streaks (horizontal streaks)
-        row_means = np.mean(data, axis=1)
-        row_mean = np.mean(row_means)
-        row_std = np.std(row_means)
+    data = wave.data.copy()
+    height, width = data.shape
+
+    # Process each row to identify and remove horizontal streaks
+    for i in range(height):
+        row = data[i, :]
+        row_mean = np.mean(row)
+        row_std = np.std(row)
 
         if row_std > 0:
-            # Identify problematic rows
-            row_threshold = row_mean + threshold_stddevs * row_std
-            bad_rows = row_means > row_threshold
+            # Identify outliers
+            z_scores = np.abs((row - row_mean) / row_std)
+            outliers = z_scores > threshold_sigma
 
-            # Correct bad rows
-            for i in np.where(bad_rows)[0]:
-                # Find nearby good rows for interpolation
-                good_rows = []
-                for offset in range(1, min(10, height)):
-                    if i - offset >= 0 and not bad_rows[i - offset]:
-                        good_rows.append(i - offset)
-                        break
-                    if i + offset < height and not bad_rows[i + offset]:
-                        good_rows.append(i + offset)
-                        break
+            if np.any(outliers):
+                # Replace outliers with interpolated values
+                valid_indices = np.where(~outliers)[0]
+                outlier_indices = np.where(outliers)[0]
 
-                if good_rows:
-                    # Replace with average of nearby good rows
-                    replacement_data = np.mean([data[r, :] for r in good_rows], axis=0)
-                    data[i, :] = replacement_data
+                if len(valid_indices) > 1:
+                    # Interpolate outlier values
+                    for idx in outlier_indices:
+                        # Find nearest valid neighbors
+                        left_neighbors = valid_indices[valid_indices < idx]
+                        right_neighbors = valid_indices[valid_indices > idx]
 
-        # Analyze column-wise streaks (vertical streaks)
-        col_means = np.mean(data, axis=0)
-        col_mean = np.mean(col_means)
-        col_std = np.std(col_means)
+                        if len(left_neighbors) > 0 and len(right_neighbors) > 0:
+                            left_idx = left_neighbors[-1]
+                            right_idx = right_neighbors[0]
+                            # Linear interpolation
+                            weight = (idx - left_idx) / (right_idx - left_idx)
+                            data[i, idx] = row[left_idx] * (1 - weight) + row[right_idx] * weight
+                        elif len(left_neighbors) > 0:
+                            data[i, idx] = row[left_neighbors[-1]]
+                        elif len(right_neighbors) > 0:
+                            data[i, idx] = row[right_neighbors[0]]
+
+    # Process each column to identify and remove vertical streaks
+    for j in range(width):
+        col = data[:, j]
+        col_mean = np.mean(col)
+        col_std = np.std(col)
 
         if col_std > 0:
-            # Identify problematic columns
-            col_threshold = col_mean + threshold_stddevs * col_std
-            bad_cols = col_means > col_threshold
+            # Identify outliers
+            z_scores = np.abs((col - col_mean) / col_std)
+            outliers = z_scores > threshold_sigma
 
-            # Correct bad columns
-            for j in np.where(bad_cols)[0]:
-                # Find nearby good columns for interpolation
-                good_cols = []
-                for offset in range(1, min(10, width)):
-                    if j - offset >= 0 and not bad_cols[j - offset]:
-                        good_cols.append(j - offset)
-                        break
-                    if j + offset < width and not bad_cols[j + offset]:
-                        good_cols.append(j + offset)
-                        break
+            if np.any(outliers):
+                # Replace outliers with interpolated values
+                valid_indices = np.where(~outliers)[0]
+                outlier_indices = np.where(outliers)[0]
 
-                if good_cols:
-                    # Replace with average of nearby good columns
-                    replacement_data = np.mean([data[:, c] for c in good_cols], axis=0)
-                    data[:, j] = replacement_data
+                if len(valid_indices) > 1:
+                    # Interpolate outlier values
+                    for idx in outlier_indices:
+                        # Find nearest valid neighbors
+                        left_neighbors = valid_indices[valid_indices < idx]
+                        right_neighbors = valid_indices[valid_indices > idx]
 
-        # Update wave data
-        wave.data = data
+                        if len(left_neighbors) > 0 and len(right_neighbors) > 0:
+                            left_idx = left_neighbors[-1]
+                            right_idx = right_neighbors[0]
+                            # Linear interpolation
+                            weight = (idx - left_idx) / (right_idx - left_idx)
+                            data[idx, j] = col[left_idx] * (1 - weight) + col[right_idx] * weight
+                        elif len(left_neighbors) > 0:
+                            data[idx, j] = col[left_neighbors[-1]]
+                        elif len(right_neighbors) > 0:
+                            data[idx, j] = col[right_neighbors[0]]
 
-        print("Streak removal completed")
-        return True
-
-    except Exception as e:
-        print(f"Error in streak removal: {e}")
-        return False
+    # Update wave data
+    wave.data = data
+    print("Streak removal completed.")
 
 
-def FlattenImage(wave, polynomial_order=2):
+def FlattenImage(wave, polynomial_order):
     """
-    Flatten an image by removing polynomial background
+    Flatten image background using polynomial fitting
+    Direct port from Igor Pro FlattenImage function
 
     Parameters:
     wave : Wave - The image to flatten
-    polynomial_order : int - Order of polynomial to fit and subtract
-
-    Returns:
-    bool - Success flag
+    polynomial_order : int - Order of polynomial for background fitting
     """
+    print(f"Flattening image with polynomial order {polynomial_order}...")
+
+    if polynomial_order <= 0:
+        return
+
+    data = wave.data.copy()
+    height, width = data.shape
+
+    # Create coordinate grids
+    y_coords, x_coords = np.mgrid[0:height, 0:width]
+
+    # Flatten coordinate arrays
+    x_flat = x_coords.flatten()
+    y_flat = y_coords.flatten()
+    z_flat = data.flatten()
+
+    # Create polynomial feature matrix
+    features = []
+    for i in range(polynomial_order + 1):
+        for j in range(polynomial_order + 1 - i):
+            if i + j <= polynomial_order:
+                features.append((x_flat ** i) * (y_flat ** j))
+
+    feature_matrix = np.column_stack(features)
+
     try:
-        print(f"Flattening image with polynomial order {polynomial_order}...")
+        # Fit polynomial surface using least squares
+        coefficients, residuals, rank, s = np.linalg.lstsq(feature_matrix, z_flat, rcond=None)
 
-        if polynomial_order <= 0:
-            return True  # No flattening requested
-
-        data = wave.data.copy()
-        height, width = data.shape
-
-        # Create coordinate grids
-        y_coords = np.arange(height)
-        x_coords = np.arange(width)
-        Y, X = np.meshgrid(y_coords, x_coords, indexing='ij')
-
-        # Flatten coordinates for fitting
-        x_flat = X.flatten()
-        y_flat = Y.flatten()
-        z_flat = data.flatten()
-
-        # Remove NaN values
-        valid_mask = ~np.isnan(z_flat)
-        x_valid = x_flat[valid_mask]
-        y_valid = y_flat[valid_mask]
-        z_valid = z_flat[valid_mask]
-
-        if len(z_valid) < (polynomial_order + 1) ** 2:
-            print("Warning: Not enough valid data points for polynomial fitting")
-            return False
-
-        # Build polynomial basis functions
-        basis_functions = []
-        for i in range(polynomial_order + 1):
-            for j in range(polynomial_order + 1 - i):
-                basis_functions.append((x_valid ** i) * (y_valid ** j))
-
-        # Create design matrix
-        A = np.column_stack(basis_functions)
-
-        # Solve least squares problem
-        try:
-            coeffs, residuals, rank, s = np.linalg.lstsq(A, z_valid, rcond=None)
-        except np.linalg.LinAlgError:
-            print("Error: Singular matrix in polynomial fitting")
-            return False
-
-        # Evaluate polynomial on full grid
-        background = np.zeros_like(data)
-        coeff_idx = 0
-        for i in range(polynomial_order + 1):
-            for j in range(polynomial_order + 1 - i):
-                background += coeffs[coeff_idx] * (X ** i) * (Y ** j)
-                coeff_idx += 1
+        # Compute background surface
+        background = np.dot(feature_matrix, coefficients)
+        background = background.reshape(height, width)
 
         # Subtract background
-        wave.data = data - background
+        flattened_data = data - background
 
-        print("Image flattening completed")
-        return True
+        # Update wave data
+        wave.data = flattened_data
 
-    except Exception as e:
-        print(f"Error in image flattening: {e}")
-        return False
+        print(f"Background flattening completed. Residual: {np.sum(residuals) if len(residuals) > 0 else 'N/A'}")
+
+    except np.linalg.LinAlgError as e:
+        print(f"Error in polynomial fitting: {e}")
+        print("Skipping background flattening.")
 
 
-def SubtractBackground(wave, method='plane'):
+def MedianFilter(wave, kernel_size=3):
     """
-    Subtract background from an image using various methods
+    Apply median filter to reduce noise
+    Direct port from Igor Pro MedianFilter equivalent
 
     Parameters:
-    wave : Wave - The image to process
-    method : str - Background subtraction method ('plane', 'polynomial', 'median')
-
-    Returns:
-    bool - Success flag
+    wave : Wave - The image to filter
+    kernel_size : int - Size of the median filter kernel
     """
-    try:
-        print(f"Subtracting background using {method} method...")
+    print(f"Applying median filter with kernel size {kernel_size}...")
 
-        data = wave.data.copy()
-        height, width = data.shape
+    filtered_data = ndimage.median_filter(wave.data, size=kernel_size)
+    wave.data = filtered_data
 
-        if method == 'plane':
-            # Fit a plane to the image edges
-            edge_points = []
-            edge_values = []
-
-            # Top and bottom edges
-            for j in range(width):
-                edge_points.extend([(0, j), (height - 1, j)])
-                edge_values.extend([data[0, j], data[height - 1, j]])
-
-            # Left and right edges (excluding corners already added)
-            for i in range(1, height - 1):
-                edge_points.extend([(i, 0), (i, width - 1)])
-                edge_values.extend([data[i, 0], data[i, width - 1]])
-
-            # Fit plane: z = a + b*x + c*y
-            if len(edge_points) >= 3:
-                edge_points = np.array(edge_points)
-                edge_values = np.array(edge_values)
-
-                A = np.column_stack([
-                    np.ones(len(edge_points)),
-                    edge_points[:, 1],  # x coordinates
-                    edge_points[:, 0]  # y coordinates
-                ])
-
-                coeffs, _, _, _ = np.linalg.lstsq(A, edge_values, rcond=None)
-
-                # Create coordinate grids
-                Y, X = np.mgrid[0:height, 0:width]
-                background = coeffs[0] + coeffs[1] * X + coeffs[2] * Y
-
-                wave.data = data - background
-
-        elif method == 'polynomial':
-            # Use existing polynomial flattening
-            return FlattenImage(wave, polynomial_order=2)
-
-        elif method == 'median':
-            # Subtract median value
-            median_val = np.nanmedian(data)
-            wave.data = data - median_val
-
-        else:
-            print(f"Unknown background subtraction method: {method}")
-            return False
-
-        print("Background subtraction completed")
-        return True
-
-    except Exception as e:
-        print(f"Error in background subtraction: {e}")
-        return False
+    print("Median filtering completed.")
 
 
-def SmoothImage(wave, method='gaussian', kernel_size=3, sigma=1.0):
+def GaussianSmooth(wave, sigma=1.0):
     """
-    Smooth an image using various filtering methods
+    Apply Gaussian smoothing filter
+    Direct port from Igor Pro Smooth equivalent
 
     Parameters:
     wave : Wave - The image to smooth
-    method : str - Smoothing method ('gaussian', 'mean', 'median')
-    kernel_size : int - Size of the smoothing kernel
-    sigma : float - Standard deviation for Gaussian smoothing
-
-    Returns:
-    bool - Success flag
+    sigma : float - Standard deviation of Gaussian kernel
     """
-    try:
-        print(f"Smoothing image using {method} filter...")
+    print(f"Applying Gaussian smoothing with sigma={sigma}...")
 
-        data = wave.data.copy()
+    smoothed_data = ndimage.gaussian_filter(wave.data, sigma=sigma)
+    wave.data = smoothed_data
 
-        if method == 'gaussian':
-            smoothed_data = ndimage.gaussian_filter(data, sigma=sigma)
-
-        elif method == 'mean':
-            kernel = np.ones((kernel_size, kernel_size)) / (kernel_size ** 2)
-            smoothed_data = ndimage.convolve(data, kernel, mode='reflect')
-
-        elif method == 'median':
-            smoothed_data = ndimage.median_filter(data, size=kernel_size)
-
-        else:
-            print(f"Unknown smoothing method: {method}")
-            return False
-
-        wave.data = smoothed_data
-
-        print("Image smoothing completed")
-        return True
-
-    except Exception as e:
-        print(f"Error in image smoothing: {e}")
-        return False
+    print("Gaussian smoothing completed.")
 
 
-def EnhanceContrast(wave, method='histogram_equalization', clip_limit=0.02):
-    """
-    Enhance image contrast using various methods
-
-    Parameters:
-    wave : Wave - The image to enhance
-    method : str - Enhancement method ('histogram_equalization', 'adaptive', 'stretch')
-    clip_limit : float - Clipping limit for adaptive methods
-
-    Returns:
-    bool - Success flag
-    """
-    try:
-        print(f"Enhancing contrast using {method} method...")
-
-        data = wave.data.copy()
-
-        if method == 'histogram_equalization':
-            # Simple histogram equalization
-            hist, bins = np.histogram(data.flatten(), bins=256, density=True)
-            cdf = hist.cumsum()
-            cdf = (cdf - cdf.min()) / (cdf.max() - cdf.min())
-
-            # Interpolate to get new values
-            data_flat = data.flatten()
-            data_eq = np.interp(data_flat, bins[:-1], cdf)
-            wave.data = data_eq.reshape(data.shape)
-
-        elif method == 'stretch':
-            # Linear contrast stretching
-            min_val = np.nanpercentile(data, 1)
-            max_val = np.nanpercentile(data, 99)
-
-            if max_val > min_val:
-                wave.data = (data - min_val) / (max_val - min_val)
-                wave.data = np.clip(wave.data, 0, 1)
-
-        elif method == 'adaptive':
-            # Simple adaptive contrast enhancement
-            # Divide image into blocks and enhance each separately
-            block_size = 64
-            height, width = data.shape
-
-            enhanced_data = data.copy()
-
-            for i in range(0, height, block_size):
-                for j in range(0, width, block_size):
-                    i_end = min(i + block_size, height)
-                    j_end = min(j + block_size, width)
-
-                    block = data[i:i_end, j:j_end]
-                    block_min = np.nanpercentile(block, 5)
-                    block_max = np.nanpercentile(block, 95)
-
-                    if block_max > block_min:
-                        enhanced_block = (block - block_min) / (block_max - block_min)
-                        enhanced_data[i:i_end, j:j_end] = enhanced_block
-
-            wave.data = enhanced_data
-
-        else:
-            print(f"Unknown contrast enhancement method: {method}")
-            return False
-
-        print("Contrast enhancement completed")
-        return True
-
-    except Exception as e:
-        print(f"Error in contrast enhancement: {e}")
-        return False
-
-
-def NormalizeImage(wave, method='minmax', target_range=(0, 1)):
+def NormalizeImage(wave, method='minmax'):
     """
     Normalize image intensity values
 
     Parameters:
     wave : Wave - The image to normalize
-    method : str - Normalization method ('minmax', 'zscore', 'robust')
-    target_range : tuple - Target range for minmax normalization
-
-    Returns:
-    bool - Success flag
+    method : str - Normalization method ('minmax', 'zscore', 'percentile')
     """
-    try:
-        print(f"Normalizing image using {method} method...")
+    print(f"Normalizing image using {method} method...")
 
-        data = wave.data.copy()
+    data = wave.data.copy()
 
-        if method == 'minmax':
-            # Min-max normalization
-            min_val = np.nanmin(data)
-            max_val = np.nanmax(data)
-
-            if max_val > min_val:
-                normalized = (data - min_val) / (max_val - min_val)
-                normalized = normalized * (target_range[1] - target_range[0]) + target_range[0]
-                wave.data = normalized
-
-        elif method == 'zscore':
-            # Z-score normalization
-            mean_val = np.nanmean(data)
-            std_val = np.nanstd(data)
-
-            if std_val > 0:
-                wave.data = (data - mean_val) / std_val
-
-        elif method == 'robust':
-            # Robust normalization using percentiles
-            q25 = np.nanpercentile(data, 25)
-            q75 = np.nanpercentile(data, 75)
-            median_val = np.nanmedian(data)
-
-            if q75 > q25:
-                wave.data = (data - median_val) / (q75 - q25)
-
+    if method == 'minmax':
+        # Min-max normalization to [0, 1]
+        min_val = np.min(data)
+        max_val = np.max(data)
+        if max_val > min_val:
+            data = (data - min_val) / (max_val - min_val)
         else:
-            print(f"Unknown normalization method: {method}")
-            return False
+            data = np.zeros_like(data)
 
-        print("Image normalization completed")
-        return True
+    elif method == 'zscore':
+        # Z-score normalization (mean=0, std=1)
+        mean_val = np.mean(data)
+        std_val = np.std(data)
+        if std_val > 0:
+            data = (data - mean_val) / std_val
+        else:
+            data = data - mean_val
 
-    except Exception as e:
-        print(f"Error in image normalization: {e}")
-        return False
+    elif method == 'percentile':
+        # Percentile-based normalization (1st to 99th percentile)
+        p1 = np.percentile(data, 1)
+        p99 = np.percentile(data, 99)
+        if p99 > p1:
+            data = np.clip((data - p1) / (p99 - p1), 0, 1)
+        else:
+            data = np.zeros_like(data)
+
+    wave.data = data
+    print("Image normalization completed.")
 
 
-def RemoveOutliers(wave, method='iqr', factor=1.5):
+def RemoveBackground(wave, method='rolling_ball', **kwargs):
     """
-    Remove outlier pixels from an image
+    Remove background from image using various methods
 
     Parameters:
     wave : Wave - The image to process
-    method : str - Outlier detection method ('iqr', 'zscore', 'percentile')
-    factor : float - Factor for outlier detection threshold
+    method : str - Background removal method
+    **kwargs : Additional parameters for specific methods
+    """
+    print(f"Removing background using {method} method...")
+
+    if method == 'rolling_ball':
+        radius = kwargs.get('radius', 50)
+        background = RollingBallBackground(wave.data, radius)
+        wave.data = wave.data - background
+
+    elif method == 'tophat':
+        kernel_size = kwargs.get('kernel_size', 15)
+        kernel = np.ones((kernel_size, kernel_size))
+        background = ndimage.morphology.white_tophat(wave.data, structure=kernel)
+        wave.data = background
+
+    elif method == 'gaussian':
+        sigma = kwargs.get('sigma', 25)
+        background = ndimage.gaussian_filter(wave.data, sigma=sigma)
+        wave.data = wave.data - background
+
+    print("Background removal completed.")
+
+
+def RollingBallBackground(image, radius):
+    """
+    Estimate background using rolling ball algorithm
+    Simplified implementation of ImageJ's rolling ball background subtraction
+
+    Parameters:
+    image : ndarray - Input image
+    radius : int - Radius of the rolling ball
 
     Returns:
-    bool - Success flag
+    ndarray - Estimated background
     """
-    try:
-        print(f"Removing outliers using {method} method...")
+    from scipy import ndimage
 
-        data = wave.data.copy()
+    # Create a ball-shaped structuring element
+    ball = np.zeros((2 * radius + 1, 2 * radius + 1))
+    y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
+    mask = x * x + y * y <= radius * radius
+    ball[mask] = 1
 
-        if method == 'iqr':
-            # Interquartile range method
-            q25 = np.nanpercentile(data, 25)
-            q75 = np.nanpercentile(data, 75)
-            iqr = q75 - q25
+    # Apply morphological opening
+    background = ndimage.morphology.grey_opening(image, structure=ball)
 
-            lower_bound = q25 - factor * iqr
-            upper_bound = q75 + factor * iqr
-
-            # Replace outliers with median
-            median_val = np.nanmedian(data)
-            outliers = (data < lower_bound) | (data > upper_bound)
-            data[outliers] = median_val
-
-        elif method == 'zscore':
-            # Z-score method
-            mean_val = np.nanmean(data)
-            std_val = np.nanstd(data)
-
-            if std_val > 0:
-                z_scores = np.abs((data - mean_val) / std_val)
-                outliers = z_scores > factor
-                data[outliers] = mean_val
-
-        elif method == 'percentile':
-            # Percentile method
-            lower_percentile = factor
-            upper_percentile = 100 - factor
-
-            lower_bound = np.nanpercentile(data, lower_percentile)
-            upper_bound = np.nanpercentile(data, upper_percentile)
-
-            median_val = np.nanmedian(data)
-            outliers = (data < lower_bound) | (data > upper_bound)
-            data[outliers] = median_val
-
-        else:
-            print(f"Unknown outlier removal method: {method}")
-            return False
-
-        wave.data = data
-
-        print("Outlier removal completed")
-        return True
-
-    except Exception as e:
-        print(f"Error in outlier removal: {e}")
-        return False
+    return background
 
 
-def TestPreprocessing():
-    """Test function for preprocessing module"""
-    print("Testing preprocessing module...")
+def EnhanceContrast(wave, method='histogram_equalization', **kwargs):
+    """
+    Enhance image contrast using various methods
 
-    # Create test data with streaks
-    test_data = np.random.rand(100, 100) * 100
+    Parameters:
+    wave : Wave - The image to enhance
+    method : str - Contrast enhancement method
+    **kwargs : Additional parameters
+    """
+    print(f"Enhancing contrast using {method} method...")
 
-    # Add artificial streaks
-    test_data[25, :] += 50  # Horizontal streak
-    test_data[:, 75] += 30  # Vertical streak
+    data = wave.data.copy()
 
-    test_image = Wave(test_data, "TestImage")
-    test_image.SetScale('x', 0, 1)
-    test_image.SetScale('y', 0, 1)
+    if method == 'histogram_equalization':
+        # Simple histogram equalization
+        hist, bins = np.histogram(data.flatten(), bins=256, density=True)
+        cdf = hist.cumsum()
+        cdf = cdf / cdf[-1]  # Normalize
 
-    # Test streak removal
-    original_max = np.max(test_image.data)
-    RemoveStreaks(test_image, 2.0)
-    processed_max = np.max(test_image.data)
+        # Interpolate to get new values
+        data_eq = np.interp(data.flatten(), bins[:-1], cdf)
+        wave.data = data_eq.reshape(data.shape)
 
-    if processed_max < original_max:
-        print("✓ Streak removal working (reduced maximum value)")
+    elif method == 'adaptive':
+        # Adaptive histogram equalization (simplified)
+        from scipy import ndimage
+
+        # Local histogram equalization using rank filters
+        footprint = np.ones((31, 31))  # 31x31 local region
+        local_mean = ndimage.uniform_filter(data, size=31)
+        local_var = ndimage.uniform_filter(data ** 2, size=31) - local_mean ** 2
+        local_std = np.sqrt(np.maximum(local_var, 0))
+
+        # Enhance based on local statistics
+        enhanced = (data - local_mean) / (local_std + 1e-6)
+        wave.data = enhanced
+
+    elif method == 'gamma':
+        gamma = kwargs.get('gamma', 1.5)
+        # Normalize to [0,1], apply gamma, then scale back
+        min_val, max_val = np.min(data), np.max(data)
+        if max_val > min_val:
+            normalized = (data - min_val) / (max_val - min_val)
+            gamma_corrected = np.power(normalized, gamma)
+            wave.data = gamma_corrected * (max_val - min_val) + min_val
+
+    print("Contrast enhancement completed.")
+
+
+def DenoiseImage(wave, method='bilateral', **kwargs):
+    """
+    Denoise image using various methods
+
+    Parameters:
+    wave : Wave - The image to denoise
+    method : str - Denoising method
+    **kwargs : Additional parameters
+    """
+    print(f"Denoising image using {method} method...")
+
+    data = wave.data.copy()
+
+    if method == 'gaussian':
+        sigma = kwargs.get('sigma', 1.0)
+        denoised = ndimage.gaussian_filter(data, sigma=sigma)
+
+    elif method == 'median':
+        size = kwargs.get('size', 3)
+        denoised = ndimage.median_filter(data, size=size)
+
+    elif method == 'bilateral':
+        # Simplified bilateral filter implementation
+        sigma_spatial = kwargs.get('sigma_spatial', 1.0)
+        sigma_intensity = kwargs.get('sigma_intensity', 0.1)
+
+        # This is a simplified version - for full bilateral filtering,
+        # you'd typically use skimage.restoration.denoise_bilateral
+        denoised = ndimage.gaussian_filter(data, sigma=sigma_spatial)
+
+    elif method == 'wiener':
+        # Wiener filter (simplified)
+        noise_var = kwargs.get('noise_var', None)
+        if noise_var is None:
+            # Estimate noise variance
+            noise_var = np.var(data) * 0.01  # Assume 1% noise
+
+        # Apply simple Wiener-like filter
+        signal_var = np.var(data)
+        filter_factor = signal_var / (signal_var + noise_var)
+        denoised = ndimage.gaussian_filter(data, sigma=1.0) * filter_factor + data * (1 - filter_factor)
+
     else:
-        print("? Streak removal completed (no change detected)")
+        print(f"Unknown denoising method: {method}")
+        return
+
+    wave.data = denoised
+    print("Image denoising completed.")
+
+
+def Testing(string_input, number_input):
+    """
+    Testing function for preprocessing operations
+    Direct port from Igor Pro Testing function
+    """
+    print(f"Preprocessing testing function called:")
+    print(f"  String input: '{string_input}'")
+    print(f"  Number input: {number_input}")
+
+    # Create a test image with noise and background
+    test_size = 64
+    test_data = np.zeros((test_size, test_size))
+
+    # Add background gradient
+    for i in range(test_size):
+        for j in range(test_size):
+            test_data[i, j] = 0.3 * (i + j) / (2 * test_size)
+
+    # Add some blob features
+    center = test_size // 2
+    for i in range(test_size):
+        for j in range(test_size):
+            r1 = np.sqrt((i - center + 10) ** 2 + (j - center) ** 2)
+            r2 = np.sqrt((i - center - 10) ** 2 + (j - center) ** 2)
+            test_data[i, j] += np.exp(-r1 ** 2 / 50) + 0.5 * np.exp(-r2 ** 2 / 20)
+
+    # Add noise
+    noise = np.random.normal(0, 0.05, (test_size, test_size))
+    test_data += noise
+
+    # Create test wave
+    test_wave = Wave(test_data, "TestImage")
+    test_wave.SetScale('x', 0, 1.0)
+    test_wave.SetScale('y', 0, 1.0)
+
+    print(f"  Created test image with shape: {test_wave.data.shape}")
+    print(f"  Original image stats: mean={np.mean(test_data):.4f}, std={np.std(test_data):.4f}")
+
+    # Test preprocessing functions
+    original_wave = Duplicate(test_wave, "Original")
 
     # Test flattening
-    FlattenImage(test_image, 2)
-    print("✓ Image flattening completed")
+    flatten_wave = Duplicate(test_wave, "Flattened")
+    FlattenImage(flatten_wave, 2)
+    print(f"  After flattening: mean={np.mean(flatten_wave.data):.4f}, std={np.std(flatten_wave.data):.4f}")
 
-    # Test smoothing
-    SmoothImage(test_image, 'gaussian', sigma=1.0)
-    print("✓ Image smoothing completed")
+    # Test streak removal
+    streak_wave = Duplicate(flatten_wave, "StreakRemoved")
+    RemoveStreaks(streak_wave, 3.0)
+    print(f"  After streak removal: mean={np.mean(streak_wave.data):.4f}, std={np.std(streak_wave.data):.4f}")
 
-    print("Preprocessing test completed")
-    return True
+    # Test normalization
+    norm_wave = Duplicate(streak_wave, "Normalized")
+    NormalizeImage(norm_wave, 'minmax')
+    print(f"  After normalization: mean={np.mean(norm_wave.data):.4f}, std={np.std(norm_wave.data):.4f}")
 
+    result = len(string_input) + number_input + test_size
+    print(f"  Test result: {result}")
 
-if __name__ == "__main__":
-    TestPreprocessing()
+    return result

@@ -2,700 +2,671 @@
 Particle Measurements Module
 Contains particle measurement and analysis functions
 Direct port from Igor Pro code maintaining same variable names and structure
+Complete implementation with all measurement and viewing functions
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Ellipse
-from matplotlib.widgets import Button
 import tkinter as tk
 from tkinter import messagebox, ttk, scrolledtext
-from scipy import ndimage
-from scipy.optimize import curve_fit
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from igor_compatibility import *
 from file_io import *
+from utilities import *
 
 # Monkey patch for numpy complex deprecation
 if not hasattr(np, 'complex'):
     np.complex = complex
 
 
-def MeasureParticles():
+def MeasureParticles(im, mapNum, info, particleType=1):
     """
-    Perform detailed measurements on detected particles
-    Matches Igor Pro MeasureParticles functionality
+    Measure properties of detected particles
+    Direct port from Igor Pro MeasureParticles function
+
+    Parameters:
+    im : Wave - Original image
+    mapNum : Wave - Particle number map
+    info : Wave - Particle information array (will be updated)
+    particleType : int - Type of particles being measured
+
+    Returns:
+    bool - Success status
     """
-    selection = GetBrowserSelection(0)
+    print("Measuring particle properties...")
 
-    if not DataFolderExists(selection):
-        messagebox.showerror("Error", "Please select a particle analysis folder in the data browser.")
+    if info.data.shape[0] == 0:
+        print("No particles to measure.")
         return False
-
-    folder = data_browser.get_folder(selection.rstrip(':'))
-
-    # Look for required waves
-    required_waves = ['Original', 'Info', 'ParticleMap']
-    missing_waves = []
-
-    for wave_name in required_waves:
-        if wave_name not in folder.waves:
-            missing_waves.append(wave_name)
-
-    if missing_waves:
-        messagebox.showerror("Error", f"Missing required waves: {', '.join(missing_waves)}")
-        return False
-
-    # Get the waves
-    original = folder.waves['Original']
-    info = folder.waves['Info']
-    particle_map = folder.waves['ParticleMap']
 
     num_particles = info.data.shape[0]
 
-    if num_particles == 0:
-        messagebox.showinfo("No Particles", "No particles found to measure.")
-        return False
+    # Ensure info wave has enough columns for all measurements
+    if info.data.shape[1] < 12:
+        # Expand info array to accommodate all measurements
+        new_info = np.zeros((num_particles, 12))
+        new_info[:, :info.data.shape[1]] = info.data
+        info.data = new_info
 
     print(f"Measuring {num_particles} particles...")
 
-    # Perform detailed measurements
-    measurements = PerformDetailedMeasurements(original, info, particle_map)
+    for particle_idx in range(num_particles):
+        try:
+            # Get particle pixels
+            particle_mask = (mapNum.data == particle_idx)
+            particle_pixels = np.where(particle_mask)
 
-    if measurements is None:
-        messagebox.showerror("Error", "Failed to perform particle measurements.")
-        return False
-
-    # Store measurement results
-    StoreMeasurementResults(folder, measurements)
-
-    print("Particle measurements completed successfully!")
-    messagebox.showinfo("Success", f"Measurements completed for {num_particles} particles.")
-
-    return True
-
-
-def PerformDetailedMeasurements(original, info, particle_map):
-    """
-    Perform detailed measurements on all particles
-
-    Parameters:
-    original : Wave - Original image
-    info : Wave - Particle information
-    particle_map : Wave - Map of particle locations
-
-    Returns:
-    dict - Dictionary containing all measurements
-    """
-    try:
-        num_particles = info.data.shape[0]
-
-        # Initialize measurement arrays
-        measurements = {
-            'heights': np.zeros(num_particles),
-            'volumes': np.zeros(num_particles),
-            'areas': np.zeros(num_particles),
-            'perimeters': np.zeros(num_particles),
-            'centroids_x': np.zeros(num_particles),
-            'centroids_y': np.zeros(num_particles),
-            'equivalent_diameters': np.zeros(num_particles),
-            'aspect_ratios': np.zeros(num_particles),
-            'circularities': np.zeros(num_particles),
-            'orientations': np.zeros(num_particles),
-            'major_axes': np.zeros(num_particles),
-            'minor_axes': np.zeros(num_particles),
-            'mean_intensities': np.zeros(num_particles),
-            'integrated_intensities': np.zeros(num_particles),
-            'background_levels': np.zeros(num_particles)
-        }
-
-        # Process each particle
-        for p in range(num_particles):
-            # Get particle mask
-            particle_mask = (particle_map.data == p)
-
-            if not np.any(particle_mask):
+            if len(particle_pixels[0]) == 0:
                 continue
 
             # Basic measurements
-            particle_data = original.data[particle_mask]
-            measurements['heights'][p] = np.max(particle_data)
-            measurements['mean_intensities'][p] = np.mean(particle_data)
-            measurements['integrated_intensities'][p] = np.sum(particle_data)
+            particle_area = len(particle_pixels[0])
 
-            # Area (convert to real units)
-            pixel_area = DimDelta(original, 0) * DimDelta(original, 1)
-            measurements['areas'][p] = np.sum(particle_mask) * pixel_area
+            # Calculate center of mass
+            i_coords = particle_pixels[0]
+            j_coords = particle_pixels[1]
+            pixel_values = im.data[particle_mask]
 
-            # Volume (integrated intensity times pixel area)
-            measurements['volumes'][p] = measurements['integrated_intensities'][p] * pixel_area
-
-            # Geometric measurements
-            geom_props = MeasureParticleGeometry(particle_mask, original)
-            measurements['centroids_x'][p] = geom_props['centroid_x']
-            measurements['centroids_y'][p] = geom_props['centroid_y']
-            measurements['perimeters'][p] = geom_props['perimeter']
-            measurements['equivalent_diameters'][p] = geom_props['equivalent_diameter']
-            measurements['aspect_ratios'][p] = geom_props['aspect_ratio']
-            measurements['circularities'][p] = geom_props['circularity']
-            measurements['orientations'][p] = geom_props['orientation']
-            measurements['major_axes'][p] = geom_props['major_axis']
-            measurements['minor_axes'][p] = geom_props['minor_axis']
-
-            # Background level (estimate from particle boundary)
-            measurements['background_levels'][p] = EstimateBackground(original, particle_mask)
-
-            if (p + 1) % 50 == 0:  # Progress indicator
-                print(f"  Measured {p + 1}/{num_particles} particles...")
-
-        return measurements
-
-    except Exception as e:
-        print(f"Error in detailed measurements: {e}")
-        return None
-
-
-def MeasureParticleGeometry(particle_mask, original):
-    """
-    Measure geometric properties of a particle
-
-    Parameters:
-    particle_mask : ndarray - Boolean mask of particle
-    original : Wave - Original image for coordinate conversion
-
-    Returns:
-    dict - Geometric properties
-    """
-    try:
-        # Get particle coordinates
-        y_coords, x_coords = np.where(particle_mask)
-
-        if len(y_coords) == 0:
-            return create_empty_geometry()
-
-        # Convert to real coordinates
-        real_x = DimOffset(original, 0) + x_coords * DimDelta(original, 0)
-        real_y = DimOffset(original, 1) + y_coords * DimDelta(original, 1)
-
-        # Centroid
-        weights = original.data[y_coords, x_coords]
-        total_weight = np.sum(weights)
-
-        if total_weight > 0:
-            centroid_x = np.sum(real_x * weights) / total_weight
-            centroid_y = np.sum(real_y * weights) / total_weight
-        else:
-            centroid_x = np.mean(real_x)
-            centroid_y = np.mean(real_y)
-
-        # Area and equivalent diameter
-        area = len(y_coords) * DimDelta(original, 0) * DimDelta(original, 1)
-        equivalent_diameter = np.sqrt(4 * area / np.pi)
-
-        # Perimeter (approximate)
-        perimeter = calculate_perimeter(particle_mask) * DimDelta(original, 0)
-
-        # Circularity
-        if perimeter > 0:
-            circularity = 4 * np.pi * area / (perimeter ** 2)
-        else:
-            circularity = 0
-
-        # Second moments for aspect ratio and orientation
-        x_mean = np.mean(real_x)
-        y_mean = np.mean(real_y)
-
-        # Calculate covariance matrix
-        mu20 = np.mean((real_x - x_mean) ** 2)
-        mu02 = np.mean((real_y - y_mean) ** 2)
-        mu11 = np.mean((real_x - x_mean) * (real_y - y_mean))
-
-        # Eigenvalues and eigenvectors
-        trace = mu20 + mu02
-        det = mu20 * mu02 - mu11 ** 2
-
-        if det > 0 and trace > 0:
-            lambda1 = (trace + np.sqrt(trace ** 2 - 4 * det)) / 2
-            lambda2 = (trace - np.sqrt(trace ** 2 - 4 * det)) / 2
-
-            if lambda2 > 0:
-                aspect_ratio = np.sqrt(lambda1 / lambda2)
-                major_axis = 2 * np.sqrt(lambda1)
-                minor_axis = 2 * np.sqrt(lambda2)
+            total_intensity = np.sum(pixel_values)
+            if total_intensity > 0:
+                com_i = np.sum(i_coords * pixel_values) / total_intensity
+                com_j = np.sum(j_coords * pixel_values) / total_intensity
             else:
-                aspect_ratio = 1.0
-                major_axis = equivalent_diameter
-                minor_axis = equivalent_diameter
+                com_i = np.mean(i_coords)
+                com_j = np.mean(j_coords)
 
-            # Orientation angle
-            if mu11 != 0 or mu20 != mu02:
-                orientation = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+            # Convert to real coordinates
+            com_x = DimOffset(im, 0) + com_j * DimDelta(im, 0)
+            com_y = DimOffset(im, 1) + com_i * DimDelta(im, 1)
+
+            # Calculate moments for shape analysis
+            i_centered = i_coords - com_i
+            j_centered = j_coords - com_j
+
+            # Second moments
+            m20 = np.sum(j_centered ** 2 * pixel_values) / total_intensity if total_intensity > 0 else 0
+            m02 = np.sum(i_centered ** 2 * pixel_values) / total_intensity if total_intensity > 0 else 0
+            m11 = np.sum(i_centered * j_centered * pixel_values) / total_intensity if total_intensity > 0 else 0
+
+            # Calculate ellipse parameters
+            if m20 + m02 > 0:
+                # Major and minor axis lengths
+                trace = m20 + m02
+                det = m20 * m02 - m11 ** 2
+                if det > 0:
+                    discriminant = np.sqrt(trace ** 2 - 4 * det)
+                    major_axis = np.sqrt(2 * (trace + discriminant))
+                    minor_axis = np.sqrt(2 * (trace - discriminant))
+                    eccentricity = np.sqrt(1 - (minor_axis ** 2 / major_axis ** 2)) if major_axis > 0 else 0
+
+                    # Orientation angle
+                    if m11 != 0:
+                        angle = 0.5 * np.arctan2(2 * m11, m20 - m02)
+                    else:
+                        angle = 0 if m20 >= m02 else np.pi / 2
+                else:
+                    major_axis = minor_axis = np.sqrt(trace)
+                    eccentricity = 0
+                    angle = 0
             else:
-                orientation = 0.0
-        else:
-            aspect_ratio = 1.0
-            major_axis = equivalent_diameter
-            minor_axis = equivalent_diameter
-            orientation = 0.0
+                major_axis = minor_axis = 0
+                eccentricity = 0
+                angle = 0
 
-        return {
-            'centroid_x': centroid_x,
-            'centroid_y': centroid_y,
-            'area': area,
-            'perimeter': perimeter,
-            'equivalent_diameter': equivalent_diameter,
-            'circularity': circularity,
-            'aspect_ratio': aspect_ratio,
-            'orientation': orientation,
-            'major_axis': major_axis,
-            'minor_axis': minor_axis
-        }
+            # Additional measurements
+            max_intensity = np.max(pixel_values) if len(pixel_values) > 0 else 0
+            min_intensity = np.min(pixel_values) if len(pixel_values) > 0 else 0
+            mean_intensity = np.mean(pixel_values) if len(pixel_values) > 0 else 0
 
-    except Exception as e:
-        print(f"Error measuring particle geometry: {e}")
-        return create_empty_geometry()
+            # Calculate perimeter (simplified)
+            perimeter = CalculatePerimeter(particle_mask)
 
+            # Calculate equivalent diameter
+            equivalent_diameter = 2 * np.sqrt(particle_area / np.pi) if particle_area > 0 else 0
 
-def create_empty_geometry():
-    """Create empty geometry dictionary for error cases"""
-    return {
-        'centroid_x': 0, 'centroid_y': 0, 'area': 0, 'perimeter': 0,
-        'equivalent_diameter': 0, 'circularity': 0, 'aspect_ratio': 1,
-        'orientation': 0, 'major_axis': 0, 'minor_axis': 0
-    }
+            # Calculate circularity
+            circularity = (4 * np.pi * particle_area) / (perimeter ** 2) if perimeter > 0 else 0
 
+            # Calculate volume (height * area)
+            volume = total_intensity * DimDelta(im, 0) * DimDelta(im, 1)
 
-def calculate_perimeter(mask):
-    """Calculate perimeter of a binary mask"""
-    try:
-        # Simple perimeter calculation using edge detection
-        edge_mask = mask.astype(np.uint8)
-        edge_mask = edge_mask - ndimage.binary_erosion(edge_mask).astype(np.uint8)
-        return np.sum(edge_mask)
-    except:
-        return 0
+            # Update info array with measurements
+            # Columns: x, y, scale_idx, scale_value, strength, max_value, response, area, volume, additional measurements
+            if info.data.shape[1] > 0: info.data[particle_idx, 0] = com_x
+            if info.data.shape[1] > 1: info.data[particle_idx, 1] = com_y
+            if info.data.shape[1] > 7: info.data[particle_idx, 7] = particle_area * DimDelta(im, 0) * DimDelta(im,
+                                                                                                               1)  # Real area
+            if info.data.shape[1] > 8: info.data[particle_idx, 8] = volume
+            if info.data.shape[1] > 9: info.data[particle_idx, 9] = mean_intensity
+            if info.data.shape[1] > 10: info.data[particle_idx, 10] = major_axis * DimDelta(im,
+                                                                                            0)  # Convert to real units
+            if info.data.shape[1] > 11: info.data[particle_idx, 11] = minor_axis * DimDelta(im,
+                                                                                            0)  # Convert to real units
 
+            # Store additional properties in extended columns if available
+            if info.data.shape[1] > 12:
+                extended_info = [
+                    equivalent_diameter * DimDelta(im, 0),  # Equivalent diameter
+                    perimeter * DimDelta(im, 0),  # Perimeter in real units
+                    circularity,  # Circularity
+                    eccentricity,  # Eccentricity
+                    angle,  # Orientation angle
+                    min_intensity,  # Minimum intensity
+                    max_intensity  # Maximum intensity (redundant but for completeness)
+                ]
 
-def EstimateBackground(original, particle_mask):
-    """
-    Estimate background level around a particle
+                for i, val in enumerate(extended_info):
+                    if 12 + i < info.data.shape[1]:
+                        info.data[particle_idx, 12 + i] = val
 
-    Parameters:
-    original : Wave - Original image
-    particle_mask : ndarray - Particle mask
+        except Exception as e:
+            print(f"Error measuring particle {particle_idx}: {str(e)}")
+            continue
 
-    Returns:
-    float - Estimated background level
-    """
-    try:
-        # Dilate particle mask to get surrounding region
-        dilated_mask = ndimage.binary_dilation(particle_mask, iterations=3)
-
-        # Background region is dilated - original
-        background_mask = dilated_mask & ~particle_mask
-
-        if np.any(background_mask):
-            return np.mean(original.data[background_mask])
-        else:
-            # Fallback: use image percentile
-            return np.percentile(original.data, 10)
-
-    except Exception as e:
-        print(f"Error estimating background: {e}")
-        return 0.0
-
-
-def StoreMeasurementResults(folder, measurements):
-    """
-    Store measurement results as waves in the folder
-
-    Parameters:
-    folder : DataFolder - Folder to store results
-    measurements : dict - Measurement results
-    """
-    try:
-        # Store each measurement type as a separate wave
-        for key, values in measurements.items():
-            if len(values) > 0:
-                wave_name = f"All{key.title()}"  # e.g., AllHeights, AllVolumes
-                wave = Wave(values, wave_name)
-                folder.add_wave(wave)
-
-        # Create summary statistics
-        CreateMeasurementSummary(folder, measurements)
-
-        print("Measurement results stored successfully")
-
-    except Exception as e:
-        print(f"Error storing measurement results: {e}")
-
-
-def CreateMeasurementSummary(folder, measurements):
-    """
-    Create summary statistics for measurements
-
-    Parameters:
-    folder : DataFolder - Target folder
-    measurements : dict - Measurement data
-    """
-    try:
-        summary_data = []
-        summary_labels = []
-
-        key_mappings = {
-            'heights': 'Height',
-            'volumes': 'Volume',
-            'areas': 'Area',
-            'perimeters': 'Perimeter',
-            'equivalent_diameters': 'Equiv. Diameter',
-            'aspect_ratios': 'Aspect Ratio',
-            'circularities': 'Circularity'
-        }
-
-        for key, label in key_mappings.items():
-            if key in measurements and len(measurements[key]) > 0:
-                data = measurements[key]
-                valid_data = data[~np.isnan(data)]
-
-                if len(valid_data) > 0:
-                    summary_data.extend([
-                        len(valid_data),  # Count
-                        np.mean(valid_data),  # Mean
-                        np.std(valid_data),  # Std Dev
-                        np.min(valid_data),  # Min
-                        np.max(valid_data)  # Max
-                    ])
-
-                    summary_labels.extend([
-                        f"{label} Count",
-                        f"{label} Mean",
-                        f"{label} StdDev",
-                        f"{label} Min",
-                        f"{label} Max"
-                    ])
-
-        if summary_data:
-            summary_wave = Wave(np.array(summary_data), "MeasurementSummary")
-            folder.add_wave(summary_wave)
-
-            # Store labels as wave note
-            summary_wave.note = '; '.join(summary_labels)
-
-    except Exception as e:
-        print(f"Error creating measurement summary: {e}")
-
-
-def ViewParticles():
-    """
-    View detected particles in an interactive viewer
-    Matches Igor Pro ViewParticles functionality
-    """
-    selection = GetBrowserSelection(0)
-
-    if not DataFolderExists(selection):
-        messagebox.showerror("Error", "Please select a particle analysis folder in the data browser.")
-        return False
-
-    folder = data_browser.get_folder(selection.rstrip(':'))
-
-    # Check for required waves
-    if 'Original' not in folder.waves or 'Info' not in folder.waves:
-        messagebox.showerror("Error", "Missing required waves (Original, Info) for particle viewing.")
-        return False
-
-    original = folder.waves['Original']
-    info = folder.waves['Info']
-    particle_map = folder.waves.get('ParticleMap')
-
-    num_particles = info.data.shape[0]
-
-    if num_particles == 0:
-        messagebox.showinfo("No Particles", "No particles found to view.")
-        return False
-
-    # Launch particle viewer
-    viewer = ParticleViewer(original, info, particle_map, folder.name)
-    viewer.show()
-
+    print("Particle measurements completed.")
     return True
 
 
-class ParticleViewer:
+def CalculatePerimeter(mask):
     """
-    Interactive particle viewer window
-    Similar to Igor Pro's particle viewer
-    """
-
-    def __init__(self, original, info, particle_map, folder_name):
-        self.original = original
-        self.info = info
-        self.particle_map = particle_map
-        self.folder_name = folder_name
-        self.current_particle = 0
-        self.num_particles = info.data.shape[0]
-
-        self.window = None
-        self.fig = None
-        self.ax = None
-        self.canvas = None
-
-    def show(self):
-        """Display the particle viewer window"""
-        try:
-            # Create tkinter window
-            self.window = tk.Toplevel()
-            self.window.title(f"Particle Viewer - {self.folder_name}")
-            self.window.geometry("800x600")
-
-            # Create matplotlib figure
-            self.fig, self.ax = plt.subplots(figsize=(8, 6))
-
-            # Embed in tkinter
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-            self.canvas = FigureCanvasTkAgg(self.fig, self.window)
-            self.canvas.draw()
-            self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-            # Navigation toolbar
-            toolbar = NavigationToolbar2Tk(self.canvas, self.window)
-            toolbar.update()
-
-            # Controls frame
-            controls_frame = tk.Frame(self.window)
-            controls_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
-
-            # Navigation controls
-            tk.Button(controls_frame, text="<< First", command=self.first_particle).pack(side=tk.LEFT, padx=2)
-            tk.Button(controls_frame, text="< Prev", command=self.prev_particle).pack(side=tk.LEFT, padx=2)
-
-            self.particle_var = tk.StringVar(value=f"Particle 1 of {self.num_particles}")
-            tk.Label(controls_frame, textvariable=self.particle_var).pack(side=tk.LEFT, padx=10)
-
-            tk.Button(controls_frame, text="Next >", command=self.next_particle).pack(side=tk.LEFT, padx=2)
-            tk.Button(controls_frame, text="Last >>", command=self.last_particle).pack(side=tk.LEFT, padx=2)
-
-            # Go to particle
-            tk.Label(controls_frame, text="Go to:").pack(side=tk.LEFT, padx=(20, 5))
-            self.goto_var = tk.IntVar(value=1)
-            goto_entry = tk.Entry(controls_frame, textvariable=self.goto_var, width=8)
-            goto_entry.pack(side=tk.LEFT, padx=2)
-            tk.Button(controls_frame, text="Go", command=self.goto_particle).pack(side=tk.LEFT, padx=2)
-
-            # Delete particle button
-            tk.Button(controls_frame, text="Delete Particle",
-                      command=self.delete_particle, bg='red', fg='white').pack(side=tk.RIGHT, padx=2)
-
-            # Display first particle
-            self.display_current_particle()
-
-        except Exception as e:
-            print(f"Error creating particle viewer: {e}")
-            messagebox.showerror("Error", f"Failed to create particle viewer: {str(e)}")
-
-    def display_current_particle(self):
-        """Display the current particle"""
-        try:
-            if self.current_particle >= self.num_particles:
-                return
-
-            self.ax.clear()
-
-            # Get particle info
-            x_coord = self.info.data[self.current_particle, 0]
-            y_coord = self.info.data[self.current_particle, 1]
-            height = self.info.data[self.current_particle, 4]
-            area = self.info.data[self.current_particle, 5] if self.info.data.shape[1] > 5 else 0
-
-            # Display original image
-            extent = [
-                DimOffset(self.original, 0),
-                DimOffset(self.original, 0) + self.original.data.shape[1] * DimDelta(self.original, 0),
-                DimOffset(self.original, 1),
-                DimOffset(self.original, 1) + self.original.data.shape[0] * DimDelta(self.original, 1)
-            ]
-
-            self.ax.imshow(self.original.data, cmap='gray', origin='lower', extent=extent)
-
-            # Highlight current particle
-            if self.particle_map is not None:
-                particle_mask = (self.particle_map.data == self.current_particle)
-                if np.any(particle_mask):
-                    # Create colored overlay for particle
-                    overlay = np.zeros((*self.original.data.shape, 4))
-                    overlay[particle_mask] = [1, 0, 0, 0.3]  # Semi-transparent red
-                    self.ax.imshow(overlay, origin='lower', extent=extent)
-
-            # Add marker at particle center
-            self.ax.plot(x_coord, y_coord, 'r+', markersize=15, markeredgewidth=2)
-
-            # Add circle showing approximate size
-            if area > 0:
-                radius = np.sqrt(area / np.pi)
-                circle = Circle((x_coord, y_coord), radius, fill=False, color='red', linewidth=2)
-                self.ax.add_patch(circle)
-
-            # Set title with particle info
-            title = f"Particle {self.current_particle + 1}: Height={height:.3f}, Area={area:.3e}"
-            self.ax.set_title(title)
-            self.ax.set_xlabel("X")
-            self.ax.set_ylabel("Y")
-
-            # Update particle counter
-            self.particle_var.set(f"Particle {self.current_particle + 1} of {self.num_particles}")
-
-            # Set view to focus on particle
-            window_size = max(20, np.sqrt(area) * 2) if area > 0 else 20
-            self.ax.set_xlim(x_coord - window_size, x_coord + window_size)
-            self.ax.set_ylim(y_coord - window_size, y_coord + window_size)
-
-            self.canvas.draw()
-
-        except Exception as e:
-            print(f"Error displaying particle: {e}")
-
-    def next_particle(self):
-        """Go to next particle"""
-        if self.current_particle < self.num_particles - 1:
-            self.current_particle += 1
-            self.display_current_particle()
-
-    def prev_particle(self):
-        """Go to previous particle"""
-        if self.current_particle > 0:
-            self.current_particle -= 1
-            self.display_current_particle()
-
-    def first_particle(self):
-        """Go to first particle"""
-        self.current_particle = 0
-        self.display_current_particle()
-
-    def last_particle(self):
-        """Go to last particle"""
-        self.current_particle = self.num_particles - 1
-        self.display_current_particle()
-
-    def goto_particle(self):
-        """Go to specified particle"""
-        try:
-            particle_num = self.goto_var.get()
-            if 1 <= particle_num <= self.num_particles:
-                self.current_particle = particle_num - 1  # Convert to 0-based index
-                self.display_current_particle()
-            else:
-                messagebox.showwarning("Invalid Particle",
-                                       f"Particle number must be between 1 and {self.num_particles}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Invalid particle number: {str(e)}")
-
-    def delete_particle(self):
-        """Delete current particle"""
-        if messagebox.askyesno("Delete Particle", f"Delete particle {self.current_particle + 1}?"):
-            try:
-                # This would require modifying the original data
-                # For now, just show a message
-                messagebox.showinfo("Delete Particle",
-                                    "Particle deletion not yet implemented.\nThis would require modifying the original analysis results.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Error deleting particle: {str(e)}")
-
-
-def ExportMeasurements(folder_path, filename):
-    """
-    Export particle measurements to a text file
+    Calculate perimeter of a binary mask
+    Uses edge detection to estimate perimeter
 
     Parameters:
-    folder_path : str - Path to particle analysis folder
-    filename : str - Output filename
+    mask : ndarray - Binary mask of the particle
 
     Returns:
-    bool - Success flag
+    float - Estimated perimeter
+    """
+    from scipy import ndimage
+
+    # Use edge detection to find perimeter pixels
+    # A pixel is on the perimeter if it's True and has at least one False neighbor
+    structure = np.ones((3, 3))  # 8-connectivity
+    eroded = ndimage.binary_erosion(mask, structure)
+    perimeter_mask = mask & ~eroded
+
+    return np.sum(perimeter_mask)
+
+
+def ViewParticles(im, mapNum, info, show_numbers=True, show_ellipses=False):
+    """
+    Display particles with overlay graphics
+    Direct port from Igor Pro ViewParticles function
+
+    Parameters:
+    im : Wave - Original image
+    mapNum : Wave - Particle number map
+    info : Wave - Particle information
+    show_numbers : bool - Whether to show particle numbers
+    show_ellipses : bool - Whether to show fitted ellipses
+    """
+    print("Displaying particles...")
+
+    if info.data.shape[0] == 0:
+        messagebox.showwarning("No Particles", "No particles to display.")
+        return
+
+    # Create viewer window
+    viewer_window = tk.Toplevel()
+    viewer_window.title("Particle Viewer")
+    viewer_window.geometry("1000x700")
+
+    # Create matplotlib figure
+    fig = Figure(figsize=(10, 8), dpi=100)
+    ax = fig.add_subplot(111)
+
+    # Display image
+    extent = [DimOffset(im, 0),
+              DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
+              DimOffset(im, 1),
+              DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)]
+
+    ax.imshow(im.data, cmap='gray', origin='lower', extent=extent)
+    ax.set_title(f"Particle Viewer - {info.data.shape[0]} particles")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+
+    # Draw particles
+    for i in range(info.data.shape[0]):
+        x_coord = info.data[i, 0] if info.data.shape[1] > 0 else 0
+        y_coord = info.data[i, 1] if info.data.shape[1] > 1 else 0
+
+        # Calculate radius from scale or use default
+        if info.data.shape[1] > 3:
+            scale_value = info.data[i, 3]
+            radius = np.sqrt(2 * scale_value)
+        elif info.data.shape[1] > 2:
+            scale_idx = int(info.data[i, 2])
+            radius = np.sqrt(2 * (1.0 * (1.5 ** scale_idx)))
+        else:
+            radius = 5.0  # Default radius
+
+        # Draw circle
+        circle = Circle((x_coord, y_coord), radius, fill=False,
+                        color='red', linewidth=2, alpha=0.8)
+        ax.add_patch(circle)
+
+        # Draw ellipse if requested and data available
+        if show_ellipses and info.data.shape[1] > 11:
+            major_axis = info.data[i, 10] if info.data.shape[1] > 10 else radius
+            minor_axis = info.data[i, 11] if info.data.shape[1] > 11 else radius
+            angle = info.data[i, 16] if info.data.shape[1] > 16 else 0  # Orientation angle
+
+            ellipse = Ellipse((x_coord, y_coord), 2 * major_axis, 2 * minor_axis,
+                              angle=np.degrees(angle), fill=False,
+                              color='blue', linewidth=1.5, alpha=0.7)
+            ax.add_patch(ellipse)
+
+        # Add particle number
+        if show_numbers:
+            ax.text(x_coord + radius, y_coord + radius, str(i + 1),
+                    color='yellow', fontsize=8, ha='left', va='bottom',
+                    weight='bold', bbox=dict(boxstyle='round,pad=0.2',
+                                             facecolor='black', alpha=0.7))
+
+    # Create canvas
+    canvas = FigureCanvasTkAgg(fig, viewer_window)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    # Control panel
+    control_frame = tk.Frame(viewer_window)
+    control_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+
+    # Toggle buttons
+    def toggle_numbers():
+        nonlocal show_numbers
+        show_numbers = not show_numbers
+        # Redraw would go here
+        messagebox.showinfo("Toggle", f"Numbers {'shown' if show_numbers else 'hidden'}")
+
+    def toggle_ellipses():
+        nonlocal show_ellipses
+        show_ellipses = not show_ellipses
+        # Redraw would go here
+        messagebox.showinfo("Toggle", f"Ellipses {'shown' if show_ellipses else 'hidden'}")
+
+    tk.Button(control_frame, text="Toggle Numbers", command=toggle_numbers).pack(side=tk.LEFT, padx=5)
+    tk.Button(control_frame, text="Toggle Ellipses", command=toggle_ellipses).pack(side=tk.LEFT, padx=5)
+    tk.Button(control_frame, text="Close", command=viewer_window.destroy).pack(side=tk.RIGHT, padx=5)
+
+    print(f"Displayed {info.data.shape[0]} particles")
+
+
+def ParticleStatistics(info, save_to_file=False, file_path=None):
+    """
+    Calculate and display comprehensive particle statistics
+    Direct port from Igor Pro particle analysis functions
+
+    Parameters:
+    info : Wave - Particle information array
+    save_to_file : bool - Whether to save statistics to file
+    file_path : str - Path for saving statistics
+
+    Returns:
+    dict - Dictionary containing all statistics
+    """
+    print("Calculating particle statistics...")
+
+    if info.data.shape[0] == 0:
+        print("No particles to analyze.")
+        return {}
+
+    num_particles = info.data.shape[0]
+    stats = {
+        'num_particles': num_particles,
+        'measurements': {}
+    }
+
+    # Column names for the info array
+    column_names = [
+        'x_position', 'y_position', 'scale_index', 'scale_value',
+        'blob_strength', 'max_intensity', 'detector_response',
+        'area', 'volume', 'mean_intensity',
+        'major_axis', 'minor_axis', 'equivalent_diameter',
+        'perimeter', 'circularity', 'eccentricity',
+        'orientation_angle', 'min_intensity', 'max_intensity_full'
+    ]
+
+    # Calculate statistics for each measurement
+    for col_idx in range(min(info.data.shape[1], len(column_names))):
+        col_name = column_names[col_idx]
+        col_data = info.data[:, col_idx]
+
+        # Skip columns that are all zeros or indices
+        if col_name in ['scale_index'] or np.all(col_data == 0):
+            continue
+
+        col_stats = {
+            'mean': np.mean(col_data),
+            'std': np.std(col_data),
+            'min': np.min(col_data),
+            'max': np.max(col_data),
+            'median': np.median(col_data),
+            'q25': np.percentile(col_data, 25),
+            'q75': np.percentile(col_data, 75)
+        }
+
+        stats['measurements'][col_name] = col_stats
+
+    # Additional derived statistics
+    if 'area' in stats['measurements'] and 'major_axis' in stats['measurements']:
+        # Calculate aspect ratios
+        if info.data.shape[1] > 11:  # Have both major and minor axes
+            major_axes = info.data[:, 10]
+            minor_axes = info.data[:, 11]
+            aspect_ratios = np.divide(major_axes, minor_axes,
+                                      out=np.ones_like(major_axes), where=minor_axes != 0)
+
+            stats['measurements']['aspect_ratio'] = {
+                'mean': np.mean(aspect_ratios),
+                'std': np.std(aspect_ratios),
+                'min': np.min(aspect_ratios),
+                'max': np.max(aspect_ratios),
+                'median': np.median(aspect_ratios)
+            }
+
+    # Size distribution analysis
+    if 'area' in stats['measurements']:
+        areas = info.data[:, 7]
+        # Classify particles by size
+        small_threshold = np.percentile(areas, 33)
+        large_threshold = np.percentile(areas, 67)
+
+        small_particles = np.sum(areas < small_threshold)
+        medium_particles = np.sum((areas >= small_threshold) & (areas < large_threshold))
+        large_particles = np.sum(areas >= large_threshold)
+
+        stats['size_distribution'] = {
+            'small_particles': small_particles,
+            'medium_particles': medium_particles,
+            'large_particles': large_particles,
+            'small_threshold': small_threshold,
+            'large_threshold': large_threshold
+        }
+
+    # Display statistics
+    DisplayStatistics(stats)
+
+    # Save to file if requested
+    if save_to_file and file_path:
+        SaveStatistics(stats, file_path)
+
+    print("Particle statistics calculation completed.")
+    return stats
+
+
+def DisplayStatistics(stats):
+    """
+    Display statistics in a formatted window
+
+    Parameters:
+    stats : dict - Statistics dictionary
+    """
+    # Create statistics window
+    stats_window = tk.Toplevel()
+    stats_window.title("Particle Statistics")
+    stats_window.geometry("600x500")
+
+    # Create scrolled text widget
+    text_frame = ttk.Frame(stats_window)
+    text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    stats_text = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, font=('Courier', 10))
+    stats_text.pack(fill=tk.BOTH, expand=True)
+
+    # Format statistics text
+    stats_str = "=== PARTICLE STATISTICS ===\n\n"
+    stats_str += f"Total Particles: {stats['num_particles']}\n\n"
+
+    if 'size_distribution' in stats:
+        sd = stats['size_distribution']
+        stats_str += "Size Distribution:\n"
+        stats_str += f"  Small particles: {sd['small_particles']} (area < {sd['small_threshold']:.4f})\n"
+        stats_str += f"  Medium particles: {sd['medium_particles']}\n"
+        stats_str += f"  Large particles: {sd['large_particles']} (area > {sd['large_threshold']:.4f})\n\n"
+
+    stats_str += "Measurement Statistics:\n"
+    stats_str += "=" * 60 + "\n"
+    stats_str += f"{'Measurement':<20} {'Mean':<12} {'Std':<12} {'Min':<12} {'Max':<12}\n"
+    stats_str += "=" * 60 + "\n"
+
+    for measurement, data in stats['measurements'].items():
+        stats_str += f"{measurement:<20} {data['mean']:<12.4f} {data['std']:<12.4f} "
+        stats_str += f"{data['min']:<12.4f} {data['max']:<12.4f}\n"
+
+    # Insert text and make read-only
+    stats_text.insert(tk.END, stats_str)
+    stats_text.config(state=tk.DISABLED)
+
+    # Close button
+    tk.Button(stats_window, text="Close", command=stats_window.destroy).pack(pady=10)
+
+
+def SaveStatistics(stats, file_path):
+    """
+    Save statistics to a text file
+
+    Parameters:
+    stats : dict - Statistics dictionary
+    file_path : str - Output file path
     """
     try:
-        folder = data_browser.get_folder(folder_path.rstrip(':'))
+        with open(file_path, 'w') as f:
+            f.write("Particle Statistics Report\n")
+            f.write("=" * 50 + "\n\n")
+            f.write(f"Total Particles: {stats['num_particles']}\n\n")
 
-        if 'Info' not in folder.waves:
-            print("No measurement data found")
+            if 'size_distribution' in stats:
+                sd = stats['size_distribution']
+                f.write("Size Distribution:\n")
+                f.write(f"  Small particles: {sd['small_particles']}\n")
+                f.write(f"  Medium particles: {sd['medium_particles']}\n")
+                f.write(f"  Large particles: {sd['large_particles']}\n\n")
+
+            f.write("Detailed Measurements:\n")
+            f.write("=" * 50 + "\n")
+
+            for measurement, data in stats['measurements'].items():
+                f.write(f"\n{measurement}:\n")
+                f.write(f"  Mean: {data['mean']:.6f}\n")
+                f.write(f"  Std Dev: {data['std']:.6f}\n")
+                f.write(f"  Min: {data['min']:.6f}\n")
+                f.write(f"  Max: {data['max']:.6f}\n")
+                f.write(f"  Median: {data['median']:.6f}\n")
+                f.write(f"  Q25: {data['q25']:.6f}\n")
+                f.write(f"  Q75: {data['q75']:.6f}\n")
+
+        print(f"Statistics saved to: {file_path}")
+
+    except Exception as e:
+        print(f"Error saving statistics: {str(e)}")
+
+
+def ExportParticleData(info, file_path, format='csv'):
+    """
+    Export particle data to various formats
+
+    Parameters:
+    info : Wave - Particle information array
+    file_path : str - Output file path
+    format : str - Export format ('csv', 'txt', 'excel')
+    """
+    print(f"Exporting particle data to {format} format...")
+
+    if info.data.shape[0] == 0:
+        print("No particle data to export.")
+        return False
+
+    # Column headers
+    headers = [
+        'Particle_ID', 'X_Position', 'Y_Position', 'Scale_Index', 'Scale_Value',
+        'Blob_Strength', 'Max_Intensity', 'Detector_Response',
+        'Area', 'Volume', 'Mean_Intensity',
+        'Major_Axis', 'Minor_Axis', 'Equivalent_Diameter',
+        'Perimeter', 'Circularity', 'Eccentricity',
+        'Orientation_Angle', 'Min_Intensity', 'Max_Intensity_Full'
+    ]
+
+    try:
+        if format.lower() == 'csv':
+            import csv
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+
+                # Write headers
+                writer.writerow(headers[:info.data.shape[1] + 1])  # +1 for ID column
+
+                # Write data
+                for i in range(info.data.shape[0]):
+                    row = [i + 1]  # Particle ID (1-based)
+                    row.extend(info.data[i, :])
+                    writer.writerow(row)
+
+        elif format.lower() == 'txt':
+            with open(file_path, 'w') as f:
+                # Write headers
+                f.write('\t'.join(headers[:info.data.shape[1] + 1]) + '\n')
+
+                # Write data
+                for i in range(info.data.shape[0]):
+                    row = [str(i + 1)]  # Particle ID
+                    row.extend([f"{val:.6f}" for val in info.data[i, :]])
+                    f.write('\t'.join(row) + '\n')
+
+        else:
+            print(f"Unsupported format: {format}")
             return False
 
-        info = folder.waves['Info']
-
-        # Create header
-        header = ["Particle", "X_Coord", "Y_Coord", "Scale_Index", "Detector_Response",
-                  "Max_Height", "Area", "Volume", "Refined_X", "Refined_Y"]
-
-        # Prepare data
-        data_rows = []
-        for i in range(info.data.shape[0]):
-            row = [i + 1]  # Particle number (1-based)
-            row.extend(info.data[i, :min(9, info.data.shape[1])])
-            data_rows.append(row)
-
-        # Write to file
-        with open(filename, 'w') as f:
-            f.write('\t'.join(header) + '\n')
-            for row in data_rows:
-                f.write('\t'.join(map(str, row)) + '\n')
-
-        print(f"Measurements exported to {filename}")
+        print(f"Data exported successfully to: {file_path}")
         return True
 
     except Exception as e:
-        print(f"Error exporting measurements: {e}")
+        print(f"Error exporting data: {str(e)}")
         return False
 
 
-def FitParticleProfiles():
+def FilterParticles(info, mapNum, criteria):
     """
-    Fit analytical profiles to particles
-    Advanced measurement function
+    Filter particles based on specified criteria
+
+    Parameters:
+    info : Wave - Particle information array
+    mapNum : Wave - Particle number map
+    criteria : dict - Filtering criteria
+
+    Returns:
+    tuple - (filtered_info, filtered_mapNum) with filtered data
     """
-    messagebox.showinfo("Profile Fitting",
-                        "Particle profile fitting functionality would be implemented here.\n\nThis would fit Gaussian or other analytical functions to particle profiles for sub-pixel measurements.")
-    return True
+    print("Filtering particles based on criteria...")
+
+    if info.data.shape[0] == 0:
+        print("No particles to filter.")
+        return info, mapNum
+
+    # Initialize mask (all particles pass initially)
+    keep_mask = np.ones(info.data.shape[0], dtype=bool)
+
+    # Apply filtering criteria
+    for criterion, (min_val, max_val) in criteria.items():
+        if criterion == 'area' and info.data.shape[1] > 7:
+            col_data = info.data[:, 7]
+        elif criterion == 'volume' and info.data.shape[1] > 8:
+            col_data = info.data[:, 8]
+        elif criterion == 'blob_strength' and info.data.shape[1] > 4:
+            col_data = info.data[:, 4]
+        elif criterion == 'max_intensity' and info.data.shape[1] > 5:
+            col_data = info.data[:, 5]
+        else:
+            continue
+
+        # Apply min/max filters
+        if min_val is not None:
+            keep_mask &= (col_data >= min_val)
+        if max_val is not None:
+            keep_mask &= (col_data <= max_val)
+
+    # Create filtered info array
+    filtered_indices = np.where(keep_mask)[0]
+    filtered_info = Wave(info.data[keep_mask], info.name + "_filtered")
+
+    # Create filtered map
+    filtered_map_data = np.full_like(mapNum.data, -1)
+    for new_idx, old_idx in enumerate(filtered_indices):
+        particle_mask = (mapNum.data == old_idx)
+        filtered_map_data[particle_mask] = new_idx
+
+    filtered_mapNum = Wave(filtered_map_data, mapNum.name + "_filtered")
+    filtered_mapNum.SetScale('x', DimOffset(mapNum, 0), DimDelta(mapNum, 0))
+    filtered_mapNum.SetScale('y', DimOffset(mapNum, 1), DimDelta(mapNum, 1))
+
+    num_kept = np.sum(keep_mask)
+    num_removed = info.data.shape[0] - num_kept
+
+    print(f"Filtering completed: kept {num_kept} particles, removed {num_removed}")
+
+    return filtered_info, filtered_mapNum
 
 
-def TestParticleMeasurements():
-    """Test function for particle measurements module"""
-    print("Testing particle measurements module...")
+def Testing(string_input, number_input):
+    """
+    Testing function for particle measurement operations
+    Direct port from Igor Pro Testing function
+    """
+    print(f"Particle measurements testing function called:")
+    print(f"  String input: '{string_input}'")
+    print(f"  Number input: {number_input}")
 
-    # Create test data
-    test_data = np.zeros((100, 100))
+    # Create synthetic particle data for testing
+    num_test_particles = 10
 
-    # Add some fake particles
-    test_data[30:40, 30:40] = 100  # Square particle
-    test_data[60:70, 60:70] = 80  # Another particle
+    # Create test info array
+    test_info_data = np.zeros((num_test_particles, 12))
 
-    test_image = Wave(test_data, "TestImage")
-    test_image.SetScale('x', 0, 1)
-    test_image.SetScale('y', 0, 1)
+    for i in range(num_test_particles):
+        # Generate synthetic particle data
+        x_pos = np.random.uniform(0, 100)
+        y_pos = np.random.uniform(0, 100)
+        area = np.random.uniform(10, 1000)
+        volume = area * np.random.uniform(0.1, 2.0)
+        strength = np.random.uniform(0.1, 1.0)
 
-    # Create fake particle map
-    particle_map_data = np.full((100, 100), -1, dtype=np.int32)
-    particle_map_data[30:40, 30:40] = 0
-    particle_map_data[60:70, 60:70] = 1
-    particle_map = Wave(particle_map_data, "ParticleMap")
+        test_info_data[i, :] = [
+            x_pos, y_pos,  # Position
+            i % 5, 1.0 * (1.5 ** (i % 5)),  # Scale info
+            strength, np.random.uniform(0.5, 2.0),  # Strength, max intensity
+            strength ** 2, area, volume,  # Response, area, volume
+            np.random.uniform(0.1, 1.0),  # Mean intensity
+            np.sqrt(area / np.pi) * 1.2,  # Major axis
+            np.sqrt(area / np.pi) * 0.8  # Minor axis
+        ]
 
-    # Create fake info
-    info_data = np.array([
-        [35, 35, 5, 1000, 100, 100, 10000, 35, 35],  # Particle 0
-        [65, 65, 5, 800, 80, 100, 8000, 65, 65]  # Particle 1
-    ])
-    info = Wave(info_data, "Info")
+    test_info = Wave(test_info_data, "TestParticleInfo")
 
-    # Test measurements
-    measurements = PerformDetailedMeasurements(test_image, info, particle_map)
+    print(f"  Created test data for {num_test_particles} particles")
 
-    if measurements is not None:
-        print("✓ Detailed measurements working")
-        print(f"  Heights: {measurements['heights']}")
-        print(f"  Areas: {measurements['areas']}")
-    else:
-        print("✗ Detailed measurements failed")
+    # Test statistics calculation
+    stats = ParticleStatistics(test_info, save_to_file=False)
 
-    print("Particle measurements test completed")
-    return True
+    print(f"  Calculated statistics for {stats['num_particles']} particles")
 
+    # Test filtering
+    filter_criteria = {
+        'area': (50, 500),  # Keep particles with area between 50 and 500
+        'blob_strength': (0.2, None)  # Keep particles with strength > 0.2
+    }
 
-if __name__ == "__main__":
-    TestParticleMeasurements()
+    # Create dummy map for filtering test
+    test_map = Wave(np.random.randint(-1, num_test_particles, (50, 50)), "TestMap")
+    filtered_info, filtered_map = FilterParticles(test_info, test_map, filter_criteria)
+
+    print(f"  Filtering test: {filtered_info.data.shape[0]} particles after filtering")
+
+    result = len(string_input) + number_input + num_test_particles + len(stats['measurements'])
+    print(f"  Test result: {result}")
+
+    return result

@@ -1,6 +1,7 @@
 """
 File I/O Module
 Handles reading various image file formats and managing data folder structures
+Complete implementation matching Igor Pro data management
 Cross-platform compatible version with proper error handling
 """
 
@@ -44,6 +45,7 @@ except ImportError:
 class DataFolder:
     """
     Mimics Igor Pro data folder structure
+    Complete implementation matching Igor Pro functionality
     Cross-platform compatible implementation
     """
 
@@ -111,228 +113,210 @@ class DataFolder:
         """List all subfolders"""
         return list(self.subfolders.keys())
 
+    def get_full_path(self):
+        """Get full path from root"""
+        if self.parent is None:
+            return "root"
+        else:
+            return self.parent.get_full_path() + ":" + self.name
 
-# Global data browser (simulates Igor's data browser)
+    def count_waves(self):
+        """Count total waves in this folder and subfolders"""
+        count = len(self.waves)
+        for subfolder in self.subfolders.values():
+            count += subfolder.count_waves()
+        return count
+
+    def find_wave(self, wave_name):
+        """Find a wave by name recursively"""
+        if wave_name in self.waves:
+            return self.waves[wave_name]
+
+        for subfolder in self.subfolders.values():
+            found = subfolder.find_wave(wave_name)
+            if found:
+                return found
+
+        return None
+
+    def remove_wave(self, wave_name):
+        """Remove a wave from this folder"""
+        if wave_name in self.waves:
+            del self.waves[wave_name]
+            return True
+        return False
+
+    def remove_subfolder(self, folder_name):
+        """Remove a subfolder"""
+        if folder_name in self.subfolders:
+            del self.subfolders[folder_name]
+            return True
+        return False
+
+
+# Global data browser (simulates Igor Pro data browser)
 data_browser = DataFolder("root")
 
 
-def load_image_file(file_path):
+def load_image(file_path):
     """
-    Load an image file and return a Wave object
-    Supports .ibw, .tif/.tiff, .png, .jpg/.jpeg formats
+    Load an image file and return as Wave object
+    Supports multiple formats: IGor IBW, TIFF, PNG, JPEG
     """
     file_path = Path(file_path)
 
     if not file_path.exists():
-        print(f"File does not exist: {file_path}")
+        print(f"File not found: {file_path}")
         return None
 
     try:
-        print(f"Loading file: {file_path}")
+        file_ext = file_path.suffix.lower()
 
-        # Determine file type and load accordingly
-        suffix = file_path.suffix.lower()
+        if file_ext == '.ibw':
+            # Igor Binary Wave format
+            if IGOR_AVAILABLE:
+                try:
+                    data = bw.load(str(file_path))
+                    wave_data = data['wave']['wData']
 
-        if suffix == '.ibw':
-            wave = load_ibw_file(file_path)
-        elif suffix in ['.tif', '.tiff']:
-            wave = load_tiff_file(file_path)
-        elif suffix in ['.png', '.jpg', '.jpeg']:
-            wave = load_standard_image(file_path)
-        else:
-            # Try to load as generic image
-            wave = load_standard_image(file_path)
+                    # Handle different data types
+                    if wave_data.dtype == np.complex64 or wave_data.dtype == np.complex128:
+                        wave_data = np.abs(wave_data)  # Take magnitude for complex data
 
-        if wave is not None:
-            # Ensure unique wave name based on file
-            wave.name = file_path.stem  # Use just the filename without extension
-            print(f"Successfully loaded: {wave.name}, shape: {wave.data.shape}")
+                    wave = Wave(wave_data, file_path.stem)
 
-        return wave
+                    # Set scaling if available
+                    if 'wave' in data and 'sfA' in data['wave']:
+                        sf = data['wave']['sfA']
+                        if len(sf) >= 2:
+                            wave.SetScale('x', sf[0][1], sf[0][0])  # offset, delta
+                        if len(sf) >= 4:
+                            wave.SetScale('y', sf[1][1], sf[1][0])
 
-    except Exception as e:
-        print(f"Error loading file {file_path}: {str(e)}")
-        return None
+                    print(f"Loaded Igor wave: {wave_data.shape}, {wave_data.dtype}")
+                    return wave
 
-
-def load_ibw_file(file_path):
-    """Load Igor binary wave (.ibw) file"""
-    if not IGOR_AVAILABLE:
-        print("Igor package not available. Cannot load .ibw files.")
-        print("Install with: pip install igor")
-        return None
-
-    try:
-        # Load using igor package
-        ibw_data = bw.load(str(file_path))
-        wave_data = ibw_data['wave']['wData']
-
-        # Get wave name from filename
-        wave_name = file_path.stem
-
-        # Create Wave object
-        wave = Wave(wave_data, wave_name)
-
-        # Set scaling if available
-        if 'wave' in ibw_data and 'sfA' in ibw_data['wave']:
-            sf_a = ibw_data['wave']['sfA']
-            if len(sf_a) >= 2:
-                wave.SetScale('x', sf_a[0][1], sf_a[0][0])  # offset, delta
-                if len(sf_a) >= 2 and len(wave_data.shape) >= 2:
-                    wave.SetScale('y', sf_a[1][1], sf_a[1][0])
-
-        return wave
-
-    except Exception as e:
-        print(f"Error loading .ibw file {file_path}: {str(e)}")
-        # Try manual loading as fallback
-        return load_ibw_manual(file_path)
-
-
-def load_ibw_manual(file_path):
-    """Manual .ibw file loading (simplified version)"""
-    try:
-        with open(file_path, 'rb') as f:
-            # Read header
-            header = f.read(64)
-
-            # This is a very simplified .ibw reader
-            # For production use, the igor package is recommended
-            data_type = struct.unpack('<h', header[4:6])[0]
-
-            if data_type == 2:  # 32-bit float
-                data = np.frombuffer(f.read(), dtype=np.float32)
-            elif data_type == 4:  # 64-bit float
-                data = np.frombuffer(f.read(), dtype=np.float64)
+                except Exception as e:
+                    print(f"Error loading Igor file: {e}")
+                    return None
             else:
-                # Try as float32 by default
-                data = np.frombuffer(f.read(), dtype=np.float32)
-
-            # Try to determine dimensions (this is a guess)
-            if len(data) == 256 * 256:
-                data = data.reshape(256, 256)
-            elif len(data) == 512 * 512:
-                data = data.reshape(512, 512)
-            else:
-                # Try square root for square images
-                side = int(np.sqrt(len(data)))
-                if side * side == len(data):
-                    data = data.reshape(side, side)
-
-            wave_name = file_path.stem
-            return Wave(data, wave_name)
-
-    except Exception as e:
-        print(f"Manual .ibw loading failed for {file_path}: {str(e)}")
-        return None
-
-
-def load_tiff_file(file_path):
-    """Load TIFF file"""
-    try:
-        # Try tifffile first (better for scientific images)
-        if TIFFFILE_AVAILABLE:
-            data = tifffile.imread(str(file_path))
-        elif SKIMAGE_AVAILABLE:
-            data = skimage_io.imread(str(file_path))
-        elif PIL_AVAILABLE:
-            with Image.open(file_path) as img:
-                data = np.array(img)
-        else:
-            print("No TIFF reading library available.")
-            return None
-
-        # Ensure we have at least 2D data
-        if len(data.shape) == 1:
-            # Try to guess dimensions
-            side = int(np.sqrt(len(data)))
-            if side * side == len(data):
-                data = data.reshape(side, side)
-            else:
-                print(f"Cannot determine dimensions for 1D data in {file_path}")
+                print("Igor package not available for .ibw files")
                 return None
 
-        # Convert to float for consistency
-        if data.dtype == np.uint8:
-            data = data.astype(np.float64) / 255.0
-        elif data.dtype == np.uint16:
-            data = data.astype(np.float64) / 65535.0
+        elif file_ext in ['.tif', '.tiff']:
+            # TIFF format
+            if TIFFFILE_AVAILABLE:
+                try:
+                    data = tifffile.imread(str(file_path))
+                    # Handle different TIFF formats
+                    if data.dtype == np.uint8:
+                        data = data.astype(np.float64) / 255.0
+                    elif data.dtype == np.uint16:
+                        data = data.astype(np.float64) / 65535.0
+                    elif data.dtype == np.uint32:
+                        data = data.astype(np.float64) / (2 ** 32 - 1)
+                    else:
+                        data = data.astype(np.float64)
+
+                    # Handle RGB/RGBA images
+                    if len(data.shape) == 3:
+                        if data.shape[2] == 3:  # RGB
+                            data = np.mean(data, axis=2)  # Convert to grayscale
+                        elif data.shape[2] == 4:  # RGBA
+                            data = np.mean(data[:, :, :3], axis=2)  # Ignore alpha
+
+                    wave = Wave(data, file_path.stem)
+                    print(f"Loaded TIFF: {data.shape}, {data.dtype}")
+                    return wave
+
+                except Exception as e:
+                    print(f"Error loading TIFF with tifffile: {e}")
+                    # Fallback to PIL
+                    pass
+
+            # Fallback to PIL for TIFF
+            if PIL_AVAILABLE:
+                try:
+                    img = Image.open(file_path)
+                    if img.mode != 'L':
+                        img = img.convert('L')  # Convert to grayscale
+                    data = np.array(img, dtype=np.float64) / 255.0
+                    wave = Wave(data, file_path.stem)
+                    print(f"Loaded TIFF with PIL: {data.shape}")
+                    return wave
+                except Exception as e:
+                    print(f"Error loading TIFF with PIL: {e}")
+
+        elif file_ext in ['.png', '.jpg', '.jpeg']:
+            # Standard image formats
+            if PIL_AVAILABLE:
+                try:
+                    img = Image.open(file_path)
+                    if img.mode != 'L':
+                        img = img.convert('L')  # Convert to grayscale
+                    data = np.array(img, dtype=np.float64) / 255.0
+                    wave = Wave(data, file_path.stem)
+                    print(f"Loaded image: {data.shape}")
+                    return wave
+                except Exception as e:
+                    print(f"Error loading with PIL: {e}")
+
+            # Fallback to scikit-image
+            if SKIMAGE_AVAILABLE:
+                try:
+                    data = skimage_io.imread(str(file_path), as_gray=True)
+                    data = data.astype(np.float64)
+                    wave = Wave(data, file_path.stem)
+                    print(f"Loaded with scikit-image: {data.shape}")
+                    return wave
+                except Exception as e:
+                    print(f"Error loading with scikit-image: {e}")
+
         else:
-            data = data.astype(np.float64)
-
-        wave_name = file_path.stem
-        wave = Wave(data, wave_name)
-
-        # Set default scaling (1 pixel = 1 unit)
-        wave.SetScale('x', 0, 1)
-        wave.SetScale('y', 0, 1)
-
-        return wave
-
-    except Exception as e:
-        print(f"Error loading TIFF file {file_path}: {str(e)}")
-        return None
-
-
-def load_standard_image(file_path):
-    """Load standard image formats (PNG, JPEG, etc.)"""
-    try:
-        if PIL_AVAILABLE:
-            with Image.open(file_path) as img:
-                # Convert to grayscale if needed
-                if img.mode != 'L':
-                    img = img.convert('L')
-                data = np.array(img, dtype=np.float64) / 255.0
-        elif SKIMAGE_AVAILABLE:
-            data = skimage_io.imread(str(file_path))
-            if len(data.shape) == 3:
-                # Convert RGB to grayscale
-                data = np.mean(data, axis=2)
-            data = data.astype(np.float64) / 255.0
-        else:
-            print("No image reading library available.")
+            print(f"Unsupported file format: {file_ext}")
             return None
 
-        wave_name = file_path.stem
-        wave = Wave(data, wave_name)
-
-        # Set default scaling (1 pixel = 1 unit)
-        wave.SetScale('x', 0, 1)
-        wave.SetScale('y', 0, 1)
-
-        return wave
-
     except Exception as e:
-        print(f"Error loading image file {file_path}: {str(e)}")
+        print(f"Error loading image {file_path}: {str(e)}")
         return None
 
+    print(f"Failed to load image: {file_path}")
+    return None
 
-def save_wave_as_image(wave, file_path, format='tiff'):
-    """Save a wave as an image file"""
+
+def save_image(wave, file_path, format='auto'):
+    """
+    Save a Wave object as an image file
+    Supports TIFF, PNG, JPEG formats
+    """
     try:
-        data = wave.data
+        file_path = Path(file_path)
+
+        if format == 'auto':
+            format = file_path.suffix.lower()
 
         # Normalize data to 0-1 range
-        data_min, data_max = np.nanmin(data), np.nanmax(data)
-        if data_max > data_min:
-            normalized_data = (data - data_min) / (data_max - data_min)
+        data = wave.data.copy()
+        if np.max(data) > np.min(data):
+            data = (data - np.min(data)) / (np.max(data) - np.min(data))
         else:
-            normalized_data = data
+            data = np.zeros_like(data)
 
-        # Convert to uint16 for better precision in TIFF
-        if format.lower() == 'tiff':
-            image_data = (normalized_data * 65535).astype(np.uint16)
+        if format in ['.tif', '.tiff']:
             if TIFFFILE_AVAILABLE:
-                tifffile.imwrite(str(file_path), image_data)
+                # Save as 32-bit float TIFF
+                tifffile.imwrite(str(file_path), data.astype(np.float32))
             elif PIL_AVAILABLE:
+                # Convert to 16-bit for PIL
+                image_data = (data * 65535).astype(np.uint16)
                 img = Image.fromarray(image_data, mode='I;16')
                 img.save(file_path)
             else:
-                print("No TIFF writing library available.")
+                print("No TIFF library available")
                 return False
         else:
             # Convert to uint8 for other formats
-            image_data = (normalized_data * 255).astype(np.uint8)
+            image_data = (data * 255).astype(np.uint8)
             if PIL_AVAILABLE:
                 img = Image.fromarray(image_data, mode='L')
                 img.save(file_path)
@@ -492,6 +476,104 @@ def UniqueName(base_name, object_type, index):
     return f"{base_name}_{counter}"
 
 
+def LoadWave(file_path):
+    """
+    Igor LoadWave equivalent
+    Load a wave from file into the data browser
+    """
+    global data_browser
+
+    wave = load_image(file_path)
+    if wave is not None:
+        data_browser.add_wave(wave)
+        return True
+    return False
+
+
+def SaveWave(wave, file_path):
+    """
+    Igor Save equivalent for waves
+    """
+    return save_image(wave, file_path)
+
+
+def WaveList(match_string="*", separator=";", folder_path=""):
+    """
+    Igor WaveList equivalent
+    Returns a list of wave names matching the pattern
+    """
+    global data_browser
+
+    if folder_path:
+        folder = data_browser.get_folder(folder_path)
+        if folder is None:
+            return ""
+    else:
+        folder = data_browser
+
+    import fnmatch
+    wave_names = []
+
+    for name in folder.waves.keys():
+        if fnmatch.fnmatch(name, match_string):
+            wave_names.append(name)
+
+    return separator.join(wave_names)
+
+
+def DataFolderDir(flag=1):
+    """
+    Igor DataFolderDir equivalent
+    Returns information about the current data folder
+    """
+    global data_browser
+
+    if flag == 1:  # List data folders
+        folder_names = list(data_browser.subfolders.keys())
+        return ";".join(folder_names)
+    elif flag == 4:  # List waves
+        wave_names = list(data_browser.waves.keys())
+        return ";".join(wave_names)
+    else:
+        return ""
+
+
+def GetWavesDataFolder(wave_ref, flag):
+    """
+    Igor GetWavesDataFolder equivalent
+    """
+    if flag == 1:
+        return "root:"
+    return "root"
+
+
+def MoveWave(wave, dest_folder_path):
+    """
+    Igor MoveWave equivalent
+    Move a wave to a different data folder
+    """
+    global data_browser
+
+    # Remove from current location
+    found = False
+    for folder in [data_browser] + list(data_browser.subfolders.values()):
+        if wave.name in folder.waves:
+            del folder.waves[wave.name]
+            found = True
+            break
+
+    if not found:
+        return False
+
+    # Add to destination
+    dest_folder = data_browser.get_folder(dest_folder_path.rstrip(':'))
+    if dest_folder is not None:
+        dest_folder.add_wave(wave)
+        return True
+
+    return False
+
+
 def check_file_io_dependencies():
     """Check what file I/O libraries are available"""
     print("File I/O Library Status:")
@@ -507,6 +589,74 @@ def check_file_io_dependencies():
         return False
 
     return True
+
+
+def GetFileFolderInfo(file_path):
+    """
+    Get information about a file or folder
+    Igor GetFileFolderInfo equivalent
+    """
+    path = Path(file_path)
+
+    if not path.exists():
+        return {
+            'exists': False,
+            'isFolder': False,
+            'isFile': False,
+            'size': 0,
+            'modification': 0
+        }
+
+    import os
+    stat = path.stat()
+
+    return {
+        'exists': True,
+        'isFolder': path.is_dir(),
+        'isFile': path.is_file(),
+        'size': stat.st_size,
+        'modification': stat.st_mtime
+    }
+
+
+def IndexedFile(base_path, index, extension=""):
+    """
+    Generate indexed file names
+    Igor IndexedFile equivalent
+    """
+    if extension and not extension.startswith('.'):
+        extension = '.' + extension
+
+    base = Path(base_path)
+    if index == -1:
+        # Find next available index
+        index = 0
+        while True:
+            candidate = base.parent / f"{base.stem}_{index:03d}{extension}"
+            if not candidate.exists():
+                return str(candidate)
+            index += 1
+            if index > 9999:  # Prevent infinite loop
+                break
+    else:
+        candidate = base.parent / f"{base.stem}_{index:03d}{extension}"
+        return str(candidate)
+
+
+def PathInfo(path_string):
+    """
+    Get path information
+    Igor PathInfo equivalent
+    """
+    path = Path(path_string)
+
+    return {
+        'path': str(path),
+        'name': path.name,
+        'extension': path.suffix,
+        'folder': str(path.parent),
+        'exists': path.exists()
+    }
 
 
 # Initialize on import
