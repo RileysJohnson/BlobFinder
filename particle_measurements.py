@@ -44,629 +44,530 @@ def MeasureParticles(im, mapNum, info, particleType=1):
 
     num_particles = info.data.shape[0]
 
-    # Ensure info wave has enough columns for all measurements
-    if info.data.shape[1] < 12:
-        # Expand info array to accommodate all measurements
-        new_info = np.zeros((num_particles, 12))
+    # Expand info array to include all measurements
+    # Columns: X, Y, Scale, DetH, LG, XIndex, YIndex, ScaleIndex, Area, Volume, Height, COM_X, COM_Y
+    if info.data.shape[1] < 13:
+        new_info = np.zeros((num_particles, 13))
         new_info[:, :info.data.shape[1]] = info.data
         info.data = new_info
 
-    print(f"Measuring {num_particles} particles...")
+    for i in range(num_particles):
+        x_coord = info.data[i, 0]
+        y_coord = info.data[i, 1]
+        scale = info.data[i, 2]
 
-    for particle_idx in range(num_particles):
-        try:
-            # Get particle pixels
-            particle_mask = (mapNum.data == particle_idx)
-            particle_pixels = np.where(particle_mask)
+        # Convert coordinates to indices
+        x_idx = int((x_coord - DimOffset(im, 0)) / DimDelta(im, 0))
+        y_idx = int((y_coord - DimOffset(im, 1)) / DimDelta(im, 1))
 
-            if len(particle_pixels[0]) == 0:
-                continue
+        # Ensure indices are within bounds
+        x_idx = max(0, min(im.data.shape[1] - 1, x_idx))
+        y_idx = max(0, min(im.data.shape[0] - 1, y_idx))
 
-            # Basic measurements
-            particle_area = len(particle_pixels[0])
+        # Measure particle properties in a region around the center
+        radius_pixels = int(scale / DimDelta(im, 0))
+        radius_pixels = max(3, radius_pixels)  # Minimum radius
 
-            # Calculate center of mass
-            i_coords = particle_pixels[0]
-            j_coords = particle_pixels[1]
-            pixel_values = im.data[particle_mask]
+        # Define measurement region
+        y_min = max(0, y_idx - radius_pixels)
+        y_max = min(im.data.shape[0], y_idx + radius_pixels + 1)
+        x_min = max(0, x_idx - radius_pixels)
+        x_max = min(im.data.shape[1], x_idx + radius_pixels + 1)
 
-            total_intensity = np.sum(pixel_values)
+        # Extract region
+        region = im.data[y_min:y_max, x_min:x_max]
+
+        # Create coordinate arrays for this region
+        y_coords = np.arange(y_min, y_max)
+        x_coords = np.arange(x_min, x_max)
+        Y, X = np.meshgrid(y_coords, x_coords, indexing='ij')
+
+        # Create mask for circular region
+        center_y, center_x = y_idx, x_idx
+        dist_sq = (Y - center_y) ** 2 + (X - center_x) ** 2
+        mask = dist_sq <= radius_pixels ** 2
+
+        if np.sum(mask) > 0:
+            # Measure area (number of pixels)
+            area_pixels = np.sum(mask)
+            area_physical = area_pixels * DimDelta(im, 0) * DimDelta(im, 1)
+
+            # Measure height (max intensity in region)
+            height = np.max(region[mask])
+
+            # Measure volume (integrated intensity)
+            volume = np.sum(region[mask]) * DimDelta(im, 0) * DimDelta(im, 1)
+
+            # Measure center of mass
+            total_intensity = np.sum(region[mask])
             if total_intensity > 0:
-                com_i = np.sum(i_coords * pixel_values) / total_intensity
-                com_j = np.sum(j_coords * pixel_values) / total_intensity
+                com_y = np.sum(Y[mask] * region[mask]) / total_intensity
+                com_x = np.sum(X[mask] * region[mask]) / total_intensity
+
+                # Convert to physical coordinates
+                com_x_phys = DimOffset(im, 0) + com_x * DimDelta(im, 0)
+                com_y_phys = DimOffset(im, 1) + com_y * DimDelta(im, 1)
             else:
-                com_i = np.mean(i_coords)
-                com_j = np.mean(j_coords)
+                com_x_phys = x_coord
+                com_y_phys = y_coord
 
-            # Convert to real coordinates
-            com_x = DimOffset(im, 0) + com_j * DimDelta(im, 0)
-            com_y = DimOffset(im, 1) + com_i * DimDelta(im, 1)
+            # Store measurements
+            info.data[i, 8] = area_physical  # Area
+            info.data[i, 9] = volume  # Volume
+            info.data[i, 10] = height  # Height
+            info.data[i, 11] = com_x_phys  # Center of mass X
+            info.data[i, 12] = com_y_phys  # Center of mass Y
+        else:
+            # Default values if no valid region
+            info.data[i, 8] = 0  # Area
+            info.data[i, 9] = 0  # Volume
+            info.data[i, 10] = 0  # Height
+            info.data[i, 11] = x_coord  # Center of mass X
+            info.data[i, 12] = y_coord  # Center of mass Y
 
-            # Calculate moments for shape analysis
-            i_centered = i_coords - com_i
-            j_centered = j_coords - com_j
-
-            # Second moments
-            m20 = np.sum(j_centered ** 2 * pixel_values) / total_intensity if total_intensity > 0 else 0
-            m02 = np.sum(i_centered ** 2 * pixel_values) / total_intensity if total_intensity > 0 else 0
-            m11 = np.sum(i_centered * j_centered * pixel_values) / total_intensity if total_intensity > 0 else 0
-
-            # Calculate ellipse parameters
-            if m20 + m02 > 0:
-                # Major and minor axis lengths
-                trace = m20 + m02
-                det = m20 * m02 - m11 ** 2
-                if det > 0:
-                    discriminant = np.sqrt(trace ** 2 - 4 * det)
-                    major_axis = np.sqrt(2 * (trace + discriminant))
-                    minor_axis = np.sqrt(2 * (trace - discriminant))
-                    eccentricity = np.sqrt(1 - (minor_axis ** 2 / major_axis ** 2)) if major_axis > 0 else 0
-
-                    # Orientation angle
-                    if m11 != 0:
-                        angle = 0.5 * np.arctan2(2 * m11, m20 - m02)
-                    else:
-                        angle = 0 if m20 >= m02 else np.pi / 2
-                else:
-                    major_axis = minor_axis = np.sqrt(trace)
-                    eccentricity = 0
-                    angle = 0
-            else:
-                major_axis = minor_axis = 0
-                eccentricity = 0
-                angle = 0
-
-            # Additional measurements
-            max_intensity = np.max(pixel_values) if len(pixel_values) > 0 else 0
-            min_intensity = np.min(pixel_values) if len(pixel_values) > 0 else 0
-            mean_intensity = np.mean(pixel_values) if len(pixel_values) > 0 else 0
-
-            # Calculate perimeter (simplified)
-            perimeter = CalculatePerimeter(particle_mask)
-
-            # Calculate equivalent diameter
-            equivalent_diameter = 2 * np.sqrt(particle_area / np.pi) if particle_area > 0 else 0
-
-            # Calculate circularity
-            circularity = (4 * np.pi * particle_area) / (perimeter ** 2) if perimeter > 0 else 0
-
-            # Calculate volume (height * area)
-            volume = total_intensity * DimDelta(im, 0) * DimDelta(im, 1)
-
-            # Update info array with measurements
-            # Columns: x, y, scale_idx, scale_value, strength, max_value, response, area, volume, additional measurements
-            if info.data.shape[1] > 0: info.data[particle_idx, 0] = com_x
-            if info.data.shape[1] > 1: info.data[particle_idx, 1] = com_y
-            if info.data.shape[1] > 7: info.data[particle_idx, 7] = particle_area * DimDelta(im, 0) * DimDelta(im,
-                                                                                                               1)  # Real area
-            if info.data.shape[1] > 8: info.data[particle_idx, 8] = volume
-            if info.data.shape[1] > 9: info.data[particle_idx, 9] = mean_intensity
-            if info.data.shape[1] > 10: info.data[particle_idx, 10] = major_axis * DimDelta(im,
-                                                                                            0)  # Convert to real units
-            if info.data.shape[1] > 11: info.data[particle_idx, 11] = minor_axis * DimDelta(im,
-                                                                                            0)  # Convert to real units
-
-            # Store additional properties in extended columns if available
-            if info.data.shape[1] > 12:
-                extended_info = [
-                    equivalent_diameter * DimDelta(im, 0),  # Equivalent diameter
-                    perimeter * DimDelta(im, 0),  # Perimeter in real units
-                    circularity,  # Circularity
-                    eccentricity,  # Eccentricity
-                    angle,  # Orientation angle
-                    min_intensity,  # Minimum intensity
-                    max_intensity  # Maximum intensity (redundant but for completeness)
-                ]
-
-                for i, val in enumerate(extended_info):
-                    if 12 + i < info.data.shape[1]:
-                        info.data[particle_idx, 12 + i] = val
-
-        except Exception as e:
-            print(f"Error measuring particle {particle_idx}: {str(e)}")
-            continue
-
-    print("Particle measurements completed.")
+    print(f"Measured {num_particles} particles")
     return True
 
 
-def CalculatePerimeter(mask):
+def ViewParticles(im, info, mapNum=None):
     """
-    Calculate perimeter of a binary mask
-    Uses edge detection to estimate perimeter
-
-    Parameters:
-    mask : ndarray - Binary mask of the particle
-
-    Returns:
-    float - Estimated perimeter
-    """
-    from scipy import ndimage
-
-    # Use edge detection to find perimeter pixels
-    # A pixel is on the perimeter if it's True and has at least one False neighbor
-    structure = np.ones((3, 3))  # 8-connectivity
-    eroded = ndimage.binary_erosion(mask, structure)
-    perimeter_mask = mask & ~eroded
-
-    return np.sum(perimeter_mask)
-
-
-def ViewParticles(im, mapNum, info, show_numbers=True, show_ellipses=False):
-    """
-    Display particles with overlay graphics
+    Interactive particle viewer
     Direct port from Igor Pro ViewParticles function
 
     Parameters:
     im : Wave - Original image
-    mapNum : Wave - Particle number map
-    info : Wave - Particle information
-    show_numbers : bool - Whether to show particle numbers
-    show_ellipses : bool - Whether to show fitted ellipses
+    info : Wave - Particle information array
+    mapNum : Wave - Particle number map (optional)
     """
-    print("Displaying particles...")
 
     if info.data.shape[0] == 0:
-        messagebox.showwarning("No Particles", "No particles to display.")
+        messagebox.showinfo("No Particles", "No particles to view.")
         return
 
-    # Create viewer window
-    viewer_window = tk.Toplevel()
-    viewer_window.title("Particle Viewer")
-    viewer_window.geometry("1000x700")
+    class ParticleViewer:
+        def __init__(self, image, particle_info, particle_map=None):
+            self.image = image
+            self.info = particle_info
+            self.map = particle_map
+            self.current_particle = 0
+            self.num_particles = particle_info.data.shape[0]
 
-    # Create matplotlib figure
-    fig = Figure(figsize=(10, 8), dpi=100)
-    ax = fig.add_subplot(111)
+            self.root = tk.Toplevel()
+            self.root.title("Particle Viewer")
+            self.root.geometry("800x600")
 
-    # Display image
-    extent = [DimOffset(im, 0),
-              DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
-              DimOffset(im, 1),
-              DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)]
+            self.setup_ui()
+            self.update_display()
 
-    ax.imshow(im.data, cmap='gray', origin='lower', extent=extent)
-    ax.set_title(f"Particle Viewer - {info.data.shape[0]} particles")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+        def setup_ui(self):
+            """Setup the particle viewer UI"""
+            # Main frame
+            main_frame = ttk.Frame(self.root, padding="10")
+            main_frame.pack(fill=tk.BOTH, expand=True)
 
-    # Draw particles
-    for i in range(info.data.shape[0]):
-        x_coord = info.data[i, 0] if info.data.shape[1] > 0 else 0
-        y_coord = info.data[i, 1] if info.data.shape[1] > 1 else 0
+            # Controls frame
+            controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
+            controls_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Calculate radius from scale or use default
-        if info.data.shape[1] > 3:
-            scale_value = info.data[i, 3]
-            radius = np.sqrt(2 * scale_value)
-        elif info.data.shape[1] > 2:
-            scale_idx = int(info.data[i, 2])
-            radius = np.sqrt(2 * (1.0 * (1.5 ** scale_idx)))
-        else:
-            radius = 5.0  # Default radius
+            # Navigation controls
+            nav_frame = ttk.Frame(controls_frame)
+            nav_frame.pack(fill=tk.X)
 
-        # Draw circle
-        circle = Circle((x_coord, y_coord), radius, fill=False,
-                        color='red', linewidth=2, alpha=0.8)
-        ax.add_patch(circle)
+            ttk.Button(nav_frame, text="Previous",
+                       command=self.prev_particle).pack(side=tk.LEFT, padx=(0, 5))
+            ttk.Button(nav_frame, text="Next",
+                       command=self.next_particle).pack(side=tk.LEFT, padx=(0, 5))
 
-        # Draw ellipse if requested and data available
-        if show_ellipses and info.data.shape[1] > 11:
-            major_axis = info.data[i, 10] if info.data.shape[1] > 10 else radius
-            minor_axis = info.data[i, 11] if info.data.shape[1] > 11 else radius
-            angle = info.data[i, 16] if info.data.shape[1] > 16 else 0  # Orientation angle
+            # Particle selection
+            ttk.Label(nav_frame, text="Particle:").pack(side=tk.LEFT, padx=(20, 5))
+            self.particle_var = tk.IntVar(value=0)
+            self.particle_spinbox = ttk.Spinbox(nav_frame, from_=0, to=self.num_particles - 1,
+                                                textvariable=self.particle_var, width=10,
+                                                command=self.on_particle_change)
+            self.particle_spinbox.pack(side=tk.LEFT, padx=(0, 5))
 
-            ellipse = Ellipse((x_coord, y_coord), 2 * major_axis, 2 * minor_axis,
-                              angle=np.degrees(angle), fill=False,
-                              color='blue', linewidth=1.5, alpha=0.7)
-            ax.add_patch(ellipse)
+            ttk.Label(nav_frame, text=f"of {self.num_particles}").pack(side=tk.LEFT, padx=(0, 20))
 
-        # Add particle number
-        if show_numbers:
-            ax.text(x_coord + radius, y_coord + radius, str(i + 1),
-                    color='yellow', fontsize=8, ha='left', va='bottom',
-                    weight='bold', bbox=dict(boxstyle='round,pad=0.2',
-                                             facecolor='black', alpha=0.7))
+            # Delete button
+            ttk.Button(nav_frame, text="Delete Particle",
+                       command=self.delete_particle).pack(side=tk.RIGHT)
 
-    # Create canvas
-    canvas = FigureCanvasTkAgg(fig, viewer_window)
-    canvas.draw()
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            # Display frame
+            display_frame = ttk.LabelFrame(main_frame, text="Particle Display", padding="10")
+            display_frame.pack(fill=tk.BOTH, expand=True)
 
-    # Control panel
-    control_frame = tk.Frame(viewer_window)
-    control_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+            # Create matplotlib figure
+            self.fig = Figure(figsize=(8, 6), dpi=100)
+            self.ax = self.fig.add_subplot(111)
+            self.canvas = FigureCanvasTkAgg(self.fig, display_frame)
+            self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    # Toggle buttons
-    def toggle_numbers():
-        nonlocal show_numbers
-        show_numbers = not show_numbers
-        # Redraw would go here
-        messagebox.showinfo("Toggle", f"Numbers {'shown' if show_numbers else 'hidden'}")
+            # Info frame
+            info_frame = ttk.LabelFrame(main_frame, text="Particle Information", padding="10")
+            info_frame.pack(fill=tk.X, pady=(10, 0))
 
-    def toggle_ellipses():
-        nonlocal show_ellipses
-        show_ellipses = not show_ellipses
-        # Redraw would go here
-        messagebox.showinfo("Toggle", f"Ellipses {'shown' if show_ellipses else 'hidden'}")
+            self.info_text = scrolledtext.ScrolledText(info_frame, height=6, width=80)
+            self.info_text.pack(fill=tk.BOTH, expand=True)
 
-    tk.Button(control_frame, text="Toggle Numbers", command=toggle_numbers).pack(side=tk.LEFT, padx=5)
-    tk.Button(control_frame, text="Toggle Ellipses", command=toggle_ellipses).pack(side=tk.LEFT, padx=5)
-    tk.Button(control_frame, text="Close", command=viewer_window.destroy).pack(side=tk.RIGHT, padx=5)
+        def update_display(self):
+            """Update the particle display"""
+            if self.current_particle >= self.num_particles:
+                self.current_particle = self.num_particles - 1
+            if self.current_particle < 0:
+                self.current_particle = 0
 
-    print(f"Displayed {info.data.shape[0]} particles")
+            # Update spinbox
+            self.particle_var.set(self.current_particle)
+
+            # Get particle info
+            p_info = self.info.data[self.current_particle]
+            x_coord = p_info[0]
+            y_coord = p_info[1]
+            scale = p_info[2]
+
+            # Convert to pixel coordinates
+            x_pixel = (x_coord - DimOffset(self.image, 0)) / DimDelta(self.image, 0)
+            y_pixel = (y_coord - DimOffset(self.image, 1)) / DimDelta(self.image, 1)
+
+            # Define view region (4x the particle scale)
+            view_radius = max(20, int(4 * scale / DimDelta(self.image, 0)))
+
+            x_min = max(0, int(x_pixel - view_radius))
+            x_max = min(self.image.data.shape[1], int(x_pixel + view_radius))
+            y_min = max(0, int(y_pixel - view_radius))
+            y_max = min(self.image.data.shape[0], int(y_pixel + view_radius))
+
+            # Extract region
+            region = self.image.data[y_min:y_max, x_min:x_max]
+
+            # Create coordinate arrays for display
+            x_coords = np.arange(x_min, x_max) * DimDelta(self.image, 0) + DimOffset(self.image, 0)
+            y_coords = np.arange(y_min, y_max) * DimDelta(self.image, 1) + DimOffset(self.image, 1)
+
+            extent = [x_coords[0], x_coords[-1], y_coords[-1], y_coords[0]]
+
+            # Clear and plot
+            self.ax.clear()
+            self.ax.imshow(region, extent=extent, cmap='gray', aspect='auto')
+
+            # Draw particle circle
+            circle = Circle((x_coord, y_coord), scale, fill=False, color='red', linewidth=2)
+            self.ax.add_patch(circle)
+
+            # Mark center
+            self.ax.plot(x_coord, y_coord, 'r+', markersize=10, markeredgewidth=2)
+
+            # Mark center of mass if available
+            if self.info.data.shape[1] > 11:
+                com_x = p_info[11]
+                com_y = p_info[12]
+                self.ax.plot(com_x, com_y, 'bx', markersize=8, markeredgewidth=2)
+
+            self.ax.set_title(f"Particle {self.current_particle}")
+            self.ax.set_xlabel("X (pixels)")
+            self.ax.set_ylabel("Y (pixels)")
+
+            self.canvas.draw()
+
+            # Update info text
+            self.update_info_text()
+
+        def update_info_text(self):
+            """Update the information text"""
+            self.info_text.delete(1.0, tk.END)
+
+            p_info = self.info.data[self.current_particle]
+
+            info_str = f"Particle {self.current_particle}\n"
+            info_str += "=" * 40 + "\n\n"
+            info_str += f"Position:\n"
+            info_str += f"  X: {p_info[0]:.3f} pixels\n"
+            info_str += f"  Y: {p_info[1]:.3f} pixels\n"
+            info_str += f"  Scale: {p_info[2]:.3f} pixels\n\n"
+
+            info_str += f"Detection Response:\n"
+            info_str += f"  DetH: {p_info[3]:.6f}\n"
+            info_str += f"  LaplacianG: {p_info[4]:.6f}\n\n"
+
+            if self.info.data.shape[1] > 8:
+                info_str += f"Measurements:\n"
+                info_str += f"  Area: {p_info[8]:.3f}\n"
+                info_str += f"  Volume: {p_info[9]:.3f}\n"
+                info_str += f"  Height: {p_info[10]:.6f}\n\n"
+
+                if self.info.data.shape[1] > 11:
+                    info_str += f"Center of Mass:\n"
+                    info_str += f"  COM X: {p_info[11]:.3f} pixels\n"
+                    info_str += f"  COM Y: {p_info[12]:.3f} pixels\n"
+
+            self.info_text.insert(1.0, info_str)
+
+        def prev_particle(self):
+            """Go to previous particle"""
+            if self.current_particle > 0:
+                self.current_particle -= 1
+                self.update_display()
+
+        def next_particle(self):
+            """Go to next particle"""
+            if self.current_particle < self.num_particles - 1:
+                self.current_particle += 1
+                self.update_display()
+
+        def on_particle_change(self):
+            """Handle particle selection change"""
+            try:
+                new_particle = self.particle_var.get()
+                if 0 <= new_particle < self.num_particles:
+                    self.current_particle = new_particle
+                    self.update_display()
+            except:
+                pass
+
+        def delete_particle(self):
+            """Delete current particle"""
+            if self.num_particles == 0:
+                return
+
+            result = messagebox.askyesno("Delete Particle",
+                                         f"Delete particle {self.current_particle}?")
+            if result:
+                # Remove from info array
+                self.info.data = np.delete(self.info.data, self.current_particle, axis=0)
+                self.num_particles -= 1
+
+                # Update map if provided
+                if self.map is not None:
+                    # Set deleted particle locations to -1
+                    self.map.data[self.map.data == self.current_particle] = -1
+                    # Renumber remaining particles
+                    for i in range(self.current_particle, self.num_particles):
+                        self.map.data[self.map.data == i + 1] = i
+
+                # Update display
+                if self.num_particles == 0:
+                    messagebox.showinfo("No Particles", "No more particles to view.")
+                    self.root.destroy()
+                    return
+
+                if self.current_particle >= self.num_particles:
+                    self.current_particle = self.num_particles - 1
+
+                # Update spinbox range
+                self.particle_spinbox.config(to=self.num_particles - 1)
+
+                self.update_display()
+
+    # Launch the particle viewer
+    viewer = ParticleViewer(im, info, mapNum)
 
 
-def ParticleStatistics(info, save_to_file=False, file_path=None):
+def AnalyzeParticleDistribution(info):
     """
-    Calculate and display comprehensive particle statistics
-    Direct port from Igor Pro particle analysis functions
+    Analyze the spatial and size distribution of particles
 
     Parameters:
     info : Wave - Particle information array
-    save_to_file : bool - Whether to save statistics to file
-    file_path : str - Path for saving statistics
 
     Returns:
-    dict - Dictionary containing all statistics
+    dict - Dictionary containing distribution statistics
     """
-    print("Calculating particle statistics...")
-
     if info.data.shape[0] == 0:
-        print("No particles to analyze.")
         return {}
 
-    num_particles = info.data.shape[0]
-    stats = {
-        'num_particles': num_particles,
-        'measurements': {}
+    # Extract data
+    x_coords = info.data[:, 0]
+    y_coords = info.data[:, 1]
+    scales = info.data[:, 2]
+
+    # Spatial statistics
+    spatial_stats = {
+        'x_mean': np.mean(x_coords),
+        'x_std': np.std(x_coords),
+        'x_min': np.min(x_coords),
+        'x_max': np.max(x_coords),
+        'y_mean': np.mean(y_coords),
+        'y_std': np.std(y_coords),
+        'y_min': np.min(y_coords),
+        'y_max': np.max(y_coords)
     }
 
-    # Column names for the info array
-    column_names = [
-        'x_position', 'y_position', 'scale_index', 'scale_value',
-        'blob_strength', 'max_intensity', 'detector_response',
-        'area', 'volume', 'mean_intensity',
-        'major_axis', 'minor_axis', 'equivalent_diameter',
-        'perimeter', 'circularity', 'eccentricity',
-        'orientation_angle', 'min_intensity', 'max_intensity_full'
-    ]
+    # Size statistics
+    size_stats = {
+        'scale_mean': np.mean(scales),
+        'scale_std': np.std(scales),
+        'scale_min': np.min(scales),
+        'scale_max': np.max(scales),
+        'scale_median': np.median(scales)
+    }
 
-    # Calculate statistics for each measurement
-    for col_idx in range(min(info.data.shape[1], len(column_names))):
-        col_name = column_names[col_idx]
-        col_data = info.data[:, col_idx]
+    # Additional measurements if available
+    measurements = {}
+    if info.data.shape[1] > 8:
+        if np.any(info.data[:, 8] > 0):  # Area
+            areas = info.data[:, 8]
+            measurements['area_mean'] = np.mean(areas)
+            measurements['area_std'] = np.std(areas)
+            measurements['area_median'] = np.median(areas)
 
-        # Skip columns that are all zeros or indices
-        if col_name in ['scale_index'] or np.all(col_data == 0):
-            continue
+        if np.any(info.data[:, 9] > 0):  # Volume
+            volumes = info.data[:, 9]
+            measurements['volume_mean'] = np.mean(volumes)
+            measurements['volume_std'] = np.std(volumes)
+            measurements['volume_median'] = np.median(volumes)
 
-        col_stats = {
-            'mean': np.mean(col_data),
-            'std': np.std(col_data),
-            'min': np.min(col_data),
-            'max': np.max(col_data),
-            'median': np.median(col_data),
-            'q25': np.percentile(col_data, 25),
-            'q75': np.percentile(col_data, 75)
-        }
+        if np.any(info.data[:, 10] > 0):  # Height
+            heights = info.data[:, 10]
+            measurements['height_mean'] = np.mean(heights)
+            measurements['height_std'] = np.std(heights)
+            measurements['height_median'] = np.median(heights)
 
-        stats['measurements'][col_name] = col_stats
-
-    # Additional derived statistics
-    if 'area' in stats['measurements'] and 'major_axis' in stats['measurements']:
-        # Calculate aspect ratios
-        if info.data.shape[1] > 11:  # Have both major and minor axes
-            major_axes = info.data[:, 10]
-            minor_axes = info.data[:, 11]
-            aspect_ratios = np.divide(major_axes, minor_axes,
-                                      out=np.ones_like(major_axes), where=minor_axes != 0)
-
-            stats['measurements']['aspect_ratio'] = {
-                'mean': np.mean(aspect_ratios),
-                'std': np.std(aspect_ratios),
-                'min': np.min(aspect_ratios),
-                'max': np.max(aspect_ratios),
-                'median': np.median(aspect_ratios)
-            }
-
-    # Size distribution analysis
-    if 'area' in stats['measurements']:
-        areas = info.data[:, 7]
-        # Classify particles by size
-        small_threshold = np.percentile(areas, 33)
-        large_threshold = np.percentile(areas, 67)
-
-        small_particles = np.sum(areas < small_threshold)
-        medium_particles = np.sum((areas >= small_threshold) & (areas < large_threshold))
-        large_particles = np.sum(areas >= large_threshold)
-
-        stats['size_distribution'] = {
-            'small_particles': small_particles,
-            'medium_particles': medium_particles,
-            'large_particles': large_particles,
-            'small_threshold': small_threshold,
-            'large_threshold': large_threshold
-        }
-
-    # Display statistics
-    DisplayStatistics(stats)
-
-    # Save to file if requested
-    if save_to_file and file_path:
-        SaveStatistics(stats, file_path)
-
-    print("Particle statistics calculation completed.")
-    return stats
+    return {
+        'num_particles': info.data.shape[0],
+        'spatial': spatial_stats,
+        'size': size_stats,
+        'measurements': measurements
+    }
 
 
-def DisplayStatistics(stats):
+def ExportParticleData(info, filename):
     """
-    Display statistics in a formatted window
-
-    Parameters:
-    stats : dict - Statistics dictionary
-    """
-    # Create statistics window
-    stats_window = tk.Toplevel()
-    stats_window.title("Particle Statistics")
-    stats_window.geometry("600x500")
-
-    # Create scrolled text widget
-    text_frame = ttk.Frame(stats_window)
-    text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    stats_text = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, font=('Courier', 10))
-    stats_text.pack(fill=tk.BOTH, expand=True)
-
-    # Format statistics text
-    stats_str = "=== PARTICLE STATISTICS ===\n\n"
-    stats_str += f"Total Particles: {stats['num_particles']}\n\n"
-
-    if 'size_distribution' in stats:
-        sd = stats['size_distribution']
-        stats_str += "Size Distribution:\n"
-        stats_str += f"  Small particles: {sd['small_particles']} (area < {sd['small_threshold']:.4f})\n"
-        stats_str += f"  Medium particles: {sd['medium_particles']}\n"
-        stats_str += f"  Large particles: {sd['large_particles']} (area > {sd['large_threshold']:.4f})\n\n"
-
-    stats_str += "Measurement Statistics:\n"
-    stats_str += "=" * 60 + "\n"
-    stats_str += f"{'Measurement':<20} {'Mean':<12} {'Std':<12} {'Min':<12} {'Max':<12}\n"
-    stats_str += "=" * 60 + "\n"
-
-    for measurement, data in stats['measurements'].items():
-        stats_str += f"{measurement:<20} {data['mean']:<12.4f} {data['std']:<12.4f} "
-        stats_str += f"{data['min']:<12.4f} {data['max']:<12.4f}\n"
-
-    # Insert text and make read-only
-    stats_text.insert(tk.END, stats_str)
-    stats_text.config(state=tk.DISABLED)
-
-    # Close button
-    tk.Button(stats_window, text="Close", command=stats_window.destroy).pack(pady=10)
-
-
-def SaveStatistics(stats, file_path):
-    """
-    Save statistics to a text file
-
-    Parameters:
-    stats : dict - Statistics dictionary
-    file_path : str - Output file path
-    """
-    try:
-        with open(file_path, 'w') as f:
-            f.write("Particle Statistics Report\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(f"Total Particles: {stats['num_particles']}\n\n")
-
-            if 'size_distribution' in stats:
-                sd = stats['size_distribution']
-                f.write("Size Distribution:\n")
-                f.write(f"  Small particles: {sd['small_particles']}\n")
-                f.write(f"  Medium particles: {sd['medium_particles']}\n")
-                f.write(f"  Large particles: {sd['large_particles']}\n\n")
-
-            f.write("Detailed Measurements:\n")
-            f.write("=" * 50 + "\n")
-
-            for measurement, data in stats['measurements'].items():
-                f.write(f"\n{measurement}:\n")
-                f.write(f"  Mean: {data['mean']:.6f}\n")
-                f.write(f"  Std Dev: {data['std']:.6f}\n")
-                f.write(f"  Min: {data['min']:.6f}\n")
-                f.write(f"  Max: {data['max']:.6f}\n")
-                f.write(f"  Median: {data['median']:.6f}\n")
-                f.write(f"  Q25: {data['q25']:.6f}\n")
-                f.write(f"  Q75: {data['q75']:.6f}\n")
-
-        print(f"Statistics saved to: {file_path}")
-
-    except Exception as e:
-        print(f"Error saving statistics: {str(e)}")
-
-
-def ExportParticleData(info, file_path, format='csv'):
-    """
-    Export particle data to various formats
+    Export particle data to CSV file
 
     Parameters:
     info : Wave - Particle information array
-    file_path : str - Output file path
-    format : str - Export format ('csv', 'txt', 'excel')
+    filename : str - Output filename
     """
-    print(f"Exporting particle data to {format} format...")
-
     if info.data.shape[0] == 0:
-        print("No particle data to export.")
+        print("No particle data to export")
         return False
 
-    # Column headers
-    headers = [
-        'Particle_ID', 'X_Position', 'Y_Position', 'Scale_Index', 'Scale_Value',
-        'Blob_Strength', 'Max_Intensity', 'Detector_Response',
-        'Area', 'Volume', 'Mean_Intensity',
-        'Major_Axis', 'Minor_Axis', 'Equivalent_Diameter',
-        'Perimeter', 'Circularity', 'Eccentricity',
-        'Orientation_Angle', 'Min_Intensity', 'Max_Intensity_Full'
-    ]
-
     try:
-        if format.lower() == 'csv':
-            import csv
-            with open(file_path, 'w', newline='') as f:
-                writer = csv.writer(f)
+        # Create header
+        headers = ["Particle_ID", "X", "Y", "Scale", "DetH", "LG", "X_Index", "Y_Index", "Scale_Index"]
 
-                # Write headers
-                writer.writerow(headers[:info.data.shape[1] + 1])  # +1 for ID column
+        if info.data.shape[1] > 8:
+            headers.extend(["Area", "Volume", "Height"])
 
-                # Write data
-                for i in range(info.data.shape[0]):
-                    row = [i + 1]  # Particle ID (1-based)
-                    row.extend(info.data[i, :])
-                    writer.writerow(row)
+        if info.data.shape[1] > 11:
+            headers.extend(["COM_X", "COM_Y"])
 
-        elif format.lower() == 'txt':
-            with open(file_path, 'w') as f:
-                # Write headers
-                f.write('\t'.join(headers[:info.data.shape[1] + 1]) + '\n')
+        # Prepare data
+        data_to_save = []
+        for i in range(info.data.shape[0]):
+            row = [i] + list(info.data[i, :len(headers) - 1])
+            data_to_save.append(row)
 
-                # Write data
-                for i in range(info.data.shape[0]):
-                    row = [str(i + 1)]  # Particle ID
-                    row.extend([f"{val:.6f}" for val in info.data[i, :]])
-                    f.write('\t'.join(row) + '\n')
+        # Save to CSV
+        import csv
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+            writer.writerows(data_to_save)
 
-        else:
-            print(f"Unsupported format: {format}")
-            return False
-
-        print(f"Data exported successfully to: {file_path}")
+        print(f"Exported {info.data.shape[0]} particles to {filename}")
         return True
 
     except Exception as e:
-        print(f"Error exporting data: {str(e)}")
+        print(f"Error exporting data: {e}")
         return False
 
 
-def FilterParticles(info, mapNum, criteria):
+def PlotParticleDistribution(info):
     """
-    Filter particles based on specified criteria
+    Create plots showing particle distribution
 
     Parameters:
     info : Wave - Particle information array
-    mapNum : Wave - Particle number map
-    criteria : dict - Filtering criteria
+    """
+    if info.data.shape[0] == 0:
+        messagebox.showinfo("No Data", "No particle data to plot.")
+        return
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle(f"Particle Distribution Analysis ({info.data.shape[0]} particles)")
+
+    # Spatial distribution
+    axes[0, 0].scatter(info.data[:, 0], info.data[:, 1], alpha=0.6)
+    axes[0, 0].set_xlabel("X Position")
+    axes[0, 0].set_ylabel("Y Position")
+    axes[0, 0].set_title("Spatial Distribution")
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Size distribution
+    axes[0, 1].hist(info.data[:, 2], bins=20, alpha=0.7, edgecolor='black')
+    axes[0, 1].set_xlabel("Scale (radius)")
+    axes[0, 1].set_ylabel("Count")
+    axes[0, 1].set_title("Size Distribution")
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Detection response
+    axes[1, 0].scatter(info.data[:, 3], info.data[:, 4], alpha=0.6)
+    axes[1, 0].set_xlabel("DetH Response")
+    axes[1, 0].set_ylabel("Laplacian of Gaussian")
+    axes[1, 0].set_title("Detection Response")
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Size vs intensity (if height data available)
+    if info.data.shape[1] > 10 and np.any(info.data[:, 10] > 0):
+        axes[1, 1].scatter(info.data[:, 2], info.data[:, 10], alpha=0.6)
+        axes[1, 1].set_xlabel("Scale (radius)")
+        axes[1, 1].set_ylabel("Height")
+        axes[1, 1].set_title("Size vs Height")
+    else:
+        axes[1, 1].scatter(info.data[:, 2], info.data[:, 3], alpha=0.6)
+        axes[1, 1].set_xlabel("Scale (radius)")
+        axes[1, 1].set_ylabel("DetH Response")
+        axes[1, 1].set_title("Size vs Response")
+
+    axes[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def FilterParticles(info, min_scale=None, max_scale=None, min_height=None, max_height=None):
+    """
+    Filter particles based on various criteria
+
+    Parameters:
+    info : Wave - Particle information array
+    min_scale, max_scale : float - Scale (radius) filtering
+    min_height, max_height : float - Height filtering
 
     Returns:
-    tuple - (filtered_info, filtered_mapNum) with filtered data
+    Wave - Filtered particle information
     """
-    print("Filtering particles based on criteria...")
-
     if info.data.shape[0] == 0:
-        print("No particles to filter.")
-        return info, mapNum
+        return info
 
-    # Initialize mask (all particles pass initially)
-    keep_mask = np.ones(info.data.shape[0], dtype=bool)
+    # Start with all particles
+    mask = np.ones(info.data.shape[0], dtype=bool)
 
-    # Apply filtering criteria
-    for criterion, (min_val, max_val) in criteria.items():
-        if criterion == 'area' and info.data.shape[1] > 7:
-            col_data = info.data[:, 7]
-        elif criterion == 'volume' and info.data.shape[1] > 8:
-            col_data = info.data[:, 8]
-        elif criterion == 'blob_strength' and info.data.shape[1] > 4:
-            col_data = info.data[:, 4]
-        elif criterion == 'max_intensity' and info.data.shape[1] > 5:
-            col_data = info.data[:, 5]
-        else:
-            continue
+    # Apply scale filtering
+    if min_scale is not None:
+        mask &= (info.data[:, 2] >= min_scale)
+    if max_scale is not None:
+        mask &= (info.data[:, 2] <= max_scale)
 
-        # Apply min/max filters
-        if min_val is not None:
-            keep_mask &= (col_data >= min_val)
-        if max_val is not None:
-            keep_mask &= (col_data <= max_val)
+    # Apply height filtering (if height data available)
+    if info.data.shape[1] > 10:
+        if min_height is not None:
+            mask &= (info.data[:, 10] >= min_height)
+        if max_height is not None:
+            mask &= (info.data[:, 10] <= max_height)
 
-    # Create filtered info array
-    filtered_indices = np.where(keep_mask)[0]
-    filtered_info = Wave(info.data[keep_mask], info.name + "_filtered")
+    # Create filtered array
+    filtered_data = info.data[mask]
+    filtered_info = Wave(filtered_data, f"{info.name}_filtered")
 
-    # Create filtered map
-    filtered_map_data = np.full_like(mapNum.data, -1)
-    for new_idx, old_idx in enumerate(filtered_indices):
-        particle_mask = (mapNum.data == old_idx)
-        filtered_map_data[particle_mask] = new_idx
+    print(f"Filtered {np.sum(~mask)} particles, {np.sum(mask)} remaining")
 
-    filtered_mapNum = Wave(filtered_map_data, mapNum.name + "_filtered")
-    filtered_mapNum.SetScale('x', DimOffset(mapNum, 0), DimDelta(mapNum, 0))
-    filtered_mapNum.SetScale('y', DimOffset(mapNum, 1), DimDelta(mapNum, 1))
-
-    num_kept = np.sum(keep_mask)
-    num_removed = info.data.shape[0] - num_kept
-
-    print(f"Filtering completed: kept {num_kept} particles, removed {num_removed}")
-
-    return filtered_info, filtered_mapNum
+    return filtered_info
 
 
 def Testing(string_input, number_input):
-    """
-    Testing function for particle measurement operations
-    Direct port from Igor Pro Testing function
-    """
-    print(f"Particle measurements testing function called:")
-    print(f"  String input: '{string_input}'")
-    print(f"  Number input: {number_input}")
-
-    # Create synthetic particle data for testing
-    num_test_particles = 10
-
-    # Create test info array
-    test_info_data = np.zeros((num_test_particles, 12))
-
-    for i in range(num_test_particles):
-        # Generate synthetic particle data
-        x_pos = np.random.uniform(0, 100)
-        y_pos = np.random.uniform(0, 100)
-        area = np.random.uniform(10, 1000)
-        volume = area * np.random.uniform(0.1, 2.0)
-        strength = np.random.uniform(0.1, 1.0)
-
-        test_info_data[i, :] = [
-            x_pos, y_pos,  # Position
-            i % 5, 1.0 * (1.5 ** (i % 5)),  # Scale info
-            strength, np.random.uniform(0.5, 2.0),  # Strength, max intensity
-            strength ** 2, area, volume,  # Response, area, volume
-            np.random.uniform(0.1, 1.0),  # Mean intensity
-            np.sqrt(area / np.pi) * 1.2,  # Major axis
-            np.sqrt(area / np.pi) * 0.8  # Minor axis
-        ]
-
-    test_info = Wave(test_info_data, "TestParticleInfo")
-
-    print(f"  Created test data for {num_test_particles} particles")
-
-    # Test statistics calculation
-    stats = ParticleStatistics(test_info, save_to_file=False)
-
-    print(f"  Calculated statistics for {stats['num_particles']} particles")
-
-    # Test filtering
-    filter_criteria = {
-        'area': (50, 500),  # Keep particles with area between 50 and 500
-        'blob_strength': (0.2, None)  # Keep particles with strength > 0.2
-    }
-
-    # Create dummy map for filtering test
-    test_map = Wave(np.random.randint(-1, num_test_particles, (50, 50)), "TestMap")
-    filtered_info, filtered_map = FilterParticles(test_info, test_map, filter_criteria)
-
-    print(f"  Filtering test: {filtered_info.data.shape[0]} particles after filtering")
-
-    result = len(string_input) + number_input + num_test_particles + len(stats['measurements'])
-    print(f"  Test result: {result}")
-
-    return result
+    """Testing function for particle_measurements module"""
+    print(f"Particle measurements testing: {string_input}, {number_input}")
+    return len(string_input) + number_input

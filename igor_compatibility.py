@@ -82,92 +82,62 @@ class Wave:
         return {'offset': 0.0, 'delta': 1.0, 'units': ''}
 
     def copy(self):
-        """Create a deep copy of the wave"""
+        """Create a copy of this wave"""
         new_wave = Wave(self.data.copy(), self.name + "_copy", self.note)
-        new_wave.scaling = self.scaling.copy()
+        for axis in self.scaling:
+            new_wave.scaling[axis] = self.scaling[axis].copy()
         return new_wave
 
-    def save(self, filename):
-        """Save wave data to file"""
-        np.save(filename, self.data)
 
-
-# Wave dimension and scaling functions
-def DimSize(wave, dimension):
-    """Igor DimSize function equivalent"""
-    if dimension < len(wave.data.shape):
-        return wave.data.shape[dimension]
-    return 0
-
-
+# Igor Pro function equivalents for wave scaling
 def DimOffset(wave, dimension):
     """Igor DimOffset function equivalent"""
-    axis_map = {0: 'x', 1: 'y', 2: 'z', 3: 't'}
-    if dimension in axis_map:
-        return wave.GetScale(axis_map[dimension])['offset']
-    return 0.0
+    if dimension == 0:
+        return wave.GetScale('x')['offset']
+    elif dimension == 1:
+        return wave.GetScale('y')['offset']
+    elif dimension == 2:
+        return wave.GetScale('z')['offset']
+    elif dimension == 3:
+        return wave.GetScale('t')['offset']
+    else:
+        return 0.0
 
 
 def DimDelta(wave, dimension):
     """Igor DimDelta function equivalent"""
-    axis_map = {0: 'x', 1: 'y', 2: 'z', 3: 't'}
-    if dimension in axis_map:
-        return wave.GetScale(axis_map[dimension])['delta']
-    return 1.0
+    if dimension == 0:
+        return wave.GetScale('x')['delta']
+    elif dimension == 1:
+        return wave.GetScale('y')['delta']
+    elif dimension == 2:
+        return wave.GetScale('z')['delta']
+    elif dimension == 3:
+        return wave.GetScale('t')['delta']
+    else:
+        return 1.0
 
 
-def SetScale(wave, axis, offset, delta, units=""):
-    """Igor SetScale function equivalent"""
-    wave.SetScale(axis, offset, delta, units)
+def DimSize(wave, dimension):
+    """Igor DimSize function equivalent"""
+    if wave.data.ndim > dimension:
+        return wave.data.shape[dimension]
+    else:
+        return 0
 
 
-# Wave creation and manipulation functions
-def Make(wave_name, n_points, x_start=0, x_delta=1):
-    """Igor Make function equivalent"""
-    data = np.zeros(n_points)
-    wave = Wave(data, wave_name)
-    wave.SetScale('x', x_start, x_delta)
-    return wave
-
-
-def Duplicate(source_wave, dest_name=None):
-    """Igor Duplicate function equivalent"""
-    if dest_name is None:
-        dest_name = source_wave.name + "_copy"
-
-    new_wave = Wave(source_wave.data.copy(), dest_name, source_wave.note)
-    # Copy all scaling information
-    for axis in ['x', 'y', 'z', 't']:
-        scale_info = source_wave.GetScale(axis)
-        new_wave.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return new_wave
-
-
-def Redimension(wave, *dimensions):
-    """Igor Redimension function equivalent"""
-    if len(dimensions) == 1 and hasattr(dimensions[0], '__iter__'):
-        dimensions = dimensions[0]
-    wave.data = np.reshape(wave.data, dimensions)
-
-
-def KillWaves(*wave_names):
-    """Igor KillWaves function equivalent (placeholder)"""
-    # In Igor, this would remove waves from memory
-    # In Python, we'll just pass since garbage collection handles this
-    pass
-
-
-def Concatenate(dest_wave, *source_waves):
-    """Igor Concatenate function equivalent"""
-    arrays = [dest_wave.data] + [w.data for w in source_waves]
-    dest_wave.data = np.concatenate(arrays)
-
-
-# Statistical functions
-def WaveMax(wave):
-    """Igor WaveMax function equivalent"""
-    return np.nanmax(wave.data)
+def DimUnits(wave, dimension):
+    """Igor DimUnits function equivalent"""
+    if dimension == 0:
+        return wave.GetScale('x')['units']
+    elif dimension == 1:
+        return wave.GetScale('y')['units']
+    elif dimension == 2:
+        return wave.GetScale('z')['units']
+    elif dimension == 3:
+        return wave.GetScale('t')['units']
+    else:
+        return ""
 
 
 def WaveMin(wave):
@@ -175,37 +145,19 @@ def WaveMin(wave):
     return np.nanmin(wave.data)
 
 
-def WaveStats(wave):
-    """Igor WaveStats function equivalent - returns dict of statistics"""
-    data = wave.data.flatten()
-    valid_data = data[~np.isnan(data)]
+def WaveMax(wave):
+    """Igor WaveMax function equivalent"""
+    return np.nanmax(wave.data)
 
-    if len(valid_data) == 0:
-        return {
-            'numpoints': 0,
-            'numinfs': 0,
-            'numnans': len(data),
-            'avg': np.nan,
-            'sum': np.nan,
-            'sdev': np.nan,
-            'sem': np.nan,
-            'rms': np.nan,
-            'min': np.nan,
-            'max': np.nan
-        }
 
-    return {
-        'numpoints': len(valid_data),
-        'numinfs': np.sum(np.isinf(data)),
-        'numnans': np.sum(np.isnan(data)),
-        'avg': np.mean(valid_data),
-        'sum': np.sum(valid_data),
-        'sdev': np.std(valid_data, ddof=1) if len(valid_data) > 1 else 0,
-        'sem': np.std(valid_data, ddof=1) / np.sqrt(len(valid_data)) if len(valid_data) > 1 else 0,
-        'rms': np.sqrt(np.mean(valid_data ** 2)),
-        'min': np.min(valid_data),
-        'max': np.max(valid_data)
-    }
+def NumPnts(wave):
+    """Igor numpnts function equivalent"""
+    return wave.data.size
+
+
+def NumDimensions(wave):
+    """Igor NumDimensions function equivalent"""
+    return wave.data.ndim
 
 
 # Mathematical functions
@@ -220,17 +172,12 @@ def Exp(x):
 
 
 def Log(x):
-    """Igor log function equivalent (natural log)"""
-    return np.log(x)
-
-
-def Ln(x):
     """Igor ln function equivalent (natural log)"""
     return np.log(x)
 
 
 def Log10(x):
-    """Igor log10 function equivalent"""
+    """Igor log function equivalent (base 10)"""
     return np.log10(x)
 
 
@@ -360,338 +307,251 @@ def BilinearInterpolate(wave, x, y, z=0):
     q0 = max(0, int(np.floor(q_mid)))
     q1 = min(wave.data.shape[0] - 1, int(np.ceil(q_mid)))
 
+    # Get fractional parts
+    fp = p_mid - p0
+    fq = q_mid - q0
+
     # Handle edge cases
     if p0 == p1:
-        p_frac = 0
-    else:
-        p_frac = p_mid - p0
-
+        fp = 0
     if q0 == q1:
-        q_frac = 0
-    else:
-        q_frac = q_mid - q0
+        fq = 0
 
-    if len(wave.data.shape) == 2:
-        # 2D interpolation
+    # Extract corner values
+    if wave.data.ndim == 2:
         v00 = wave.data[q0, p0]
         v01 = wave.data[q1, p0]
         v10 = wave.data[q0, p1]
         v11 = wave.data[q1, p1]
-
-        # Bilinear interpolation
-        v0 = v00 * (1 - p_frac) + v10 * p_frac
-        v1 = v01 * (1 - p_frac) + v11 * p_frac
-        result = v0 * (1 - q_frac) + v1 * q_frac
-
-        return result
-
-    elif len(wave.data.shape) == 3:
-        # 3D interpolation (trilinear)
-        r_mid = (z - DimOffset(wave, 2)) / DimDelta(wave, 2)
-        r0 = max(0, int(np.floor(r_mid)))
-        r1 = min(wave.data.shape[2] - 1, int(np.ceil(r_mid)))
-
-        if r0 == r1:
-            r_frac = 0
-        else:
-            r_frac = r_mid - r0
-
-        # Get 8 corner values
-        v000 = wave.data[q0, p0, r0]
-        v001 = wave.data[q0, p0, r1]
-        v010 = wave.data[q0, p1, r0]
-        v011 = wave.data[q0, p1, r1]
-        v100 = wave.data[q1, p0, r0]
-        v101 = wave.data[q1, p0, r1]
-        v110 = wave.data[q1, p1, r0]
-        v111 = wave.data[q1, p1, r1]
-
-        # Trilinear interpolation
-        v00 = v000 * (1 - r_frac) + v001 * r_frac
-        v01 = v010 * (1 - r_frac) + v011 * r_frac
-        v10 = v100 * (1 - r_frac) + v101 * r_frac
-        v11 = v110 * (1 - r_frac) + v111 * r_frac
-
-        v0 = v00 * (1 - p_frac) + v01 * p_frac
-        v1 = v10 * (1 - p_frac) + v11 * p_frac
-        result = v0 * (1 - q_frac) + v1 * q_frac
-
-        return result
-
-    return 0
-
-
-# Image processing functions
-def ImageTransform(transform_type, wave, *args):
-    """Igor ImageTransform function equivalent"""
-    if transform_type.lower() == 'fliprows':
-        wave.data = np.flipud(wave.data)
-    elif transform_type.lower() == 'flipcols':
-        wave.data = np.fliplr(wave.data)
-    elif transform_type.lower() == 'transpose':
-        wave.data = wave.data.T
-    elif transform_type.lower() == 'rotatecw':
-        wave.data = np.rot90(wave.data, -1)
-    elif transform_type.lower() == 'rotateccw':
-        wave.data = np.rot90(wave.data, 1)
-
-
-def ImageStats(wave):
-    """Igor ImageStats function equivalent"""
-    return WaveStats(wave)
-
-
-def ImageFilter(filter_type, wave, *args):
-    """Igor ImageFilter function equivalent"""
-    if filter_type.lower() == 'gauss':
-        if len(args) > 0:
-            sigma = args[0]
-        else:
-            sigma = 1.0
-        wave.data = ndimage.gaussian_filter(wave.data, sigma)
-    elif filter_type.lower() == 'median':
-        if len(args) > 0:
-            size = args[0]
-        else:
-            size = 3
-        wave.data = ndimage.median_filter(wave.data, size)
-    elif filter_type.lower() == 'min':
-        if len(args) > 0:
-            size = args[0]
-        else:
-            size = 3
-        wave.data = ndimage.minimum_filter(wave.data, size)
-    elif filter_type.lower() == 'max':
-        if len(args) > 0:
-            size = args[0]
-        else:
-            size = 3
-        wave.data = ndimage.maximum_filter(wave.data, size)
-
-
-def Smooth(wave, smoothing_factor):
-    """Igor Smooth function equivalent"""
-    # Apply Gaussian smoothing
-    sigma = smoothing_factor / 2.355  # Convert FWHM to sigma
-    wave.data = ndimage.gaussian_filter(wave.data, sigma)
-
-
-def Differentiate(wave, axis=0):
-    """Igor Differentiate function equivalent"""
-    wave.data = np.gradient(wave.data, axis=axis)
-
-
-def Integrate(wave, axis=0):
-    """Igor Integrate function equivalent"""
-    wave.data = np.cumsum(wave.data, axis=axis) * DimDelta(wave, axis)
-
-
-# FFT functions
-def FFT(wave, dest_wave=None):
-    """Igor FFT function equivalent"""
-    if dest_wave is None:
-        dest_wave = Wave(name=wave.name + "_FFT")
-
-    fft_data = np.fft.fft(wave.data)
-    dest_wave.data = fft_data
-
-    # Set up frequency scaling
-    n = len(wave.data)
-    dt = DimDelta(wave, 0)
-    freq_delta = 1.0 / (n * dt)
-    dest_wave.SetScale('x', 0, freq_delta)
-
-    return dest_wave
-
-
-def IFFT(wave, dest_wave=None):
-    """Igor IFFT function equivalent"""
-    if dest_wave is None:
-        dest_wave = Wave(name=wave.name + "_IFFT")
-
-    ifft_data = np.fft.ifft(wave.data)
-    dest_wave.data = ifft_data
-
-    return dest_wave
-
-
-# String functions
-def StringFromList(item_index, list_string, separator=";"):
-    """Igor StringFromList function equivalent"""
-    items = list_string.split(separator)
-    if 0 <= item_index < len(items):
-        return items[item_index]
-    return ""
-
-
-def ItemsInList(list_string, separator=";"):
-    """Igor ItemsInList function equivalent"""
-    if not list_string:
-        return 0
-    return len(list_string.split(separator))
-
-
-def AddListItem(item, list_string, separator=";"):
-    """Igor AddListItem function equivalent"""
-    if list_string:
-        return list_string + separator + item
-    return item
-
-
-def RemoveListItem(item_index, list_string, separator=";"):
-    """Igor RemoveListItem function equivalent"""
-    items = list_string.split(separator)
-    if 0 <= item_index < len(items):
-        items.pop(item_index)
-    return separator.join(items)
-
-
-# Utility functions
-def NumType(value):
-    """Igor NumType function equivalent"""
-    if np.isnan(value):
-        return 2  # NaN
-    elif np.isinf(value):
-        return 1  # Inf
+    elif wave.data.ndim == 3:
+        layer = max(0, min(wave.data.shape[2] - 1, int(z)))
+        v00 = wave.data[q0, p0, layer]
+        v01 = wave.data[q1, p0, layer]
+        v10 = wave.data[q0, p1, layer]
+        v11 = wave.data[q1, p1, layer]
     else:
-        return 0  # Normal number
+        return 0
 
+    # Bilinear interpolation
+    v0 = v00 * (1 - fp) + v10 * fp
+    v1 = v01 * (1 - fp) + v11 * fp
+    value = v0 * (1 - fq) + v1 * fq
 
-def Exists(name):
-    """Igor Exists function equivalent"""
-    # This would check if a wave/variable exists in Igor
-    # For our purposes, we'll implement a simple version
-    return name is not None and name != ""
-
-
-def CleanupName(name, replacement_char="_"):
-    """Igor CleanupName function equivalent"""
-    import re
-    # Replace invalid characters with underscore
-    clean_name = re.sub(r'[^\w]', replacement_char, name)
-    # Ensure it doesn't start with a number
-    if clean_name and clean_name[0].isdigit():
-        clean_name = replacement_char + clean_name
-    return clean_name
-
-
-def UniqueName(base_name, name_type=1, index=0):
-    """Igor UniqueName function equivalent"""
-    # For simplicity, just append a counter
-    counter = index
-    candidate = base_name
-    # In a real implementation, you'd check against existing names
-    while counter > 0:  # Simple implementation
-        candidate = f"{base_name}_{counter}"
-        counter += 1
-        if counter > 1000:  # Prevent infinite loop
-            break
-    return candidate
-
-
-# Variable functions
-def Variable(name, value=0):
-    """Igor Variable declaration equivalent"""
-    # In Igor, this creates a global variable
-    # For Python, we'll just return the value
     return value
 
 
-def NVAR(name):
-    """Igor NVAR (numeric variable reference) equivalent"""
-    # This would reference a global numeric variable in Igor
-    # For Python, we'll implement a simple registry
-    if not hasattr(NVAR, 'registry'):
-        NVAR.registry = {}
-    return NVAR.registry.get(name, 0)
+# Statistical functions
+def StatsQuantile(wave, quantile):
+    """Igor StatsQuantile function equivalent"""
+    return np.nanquantile(wave.data, quantile)
 
 
-def SVAR(name):
-    """Igor SVAR (string variable reference) equivalent"""
-    # This would reference a global string variable in Igor
-    # For Python, we'll implement a simple registry
-    if not hasattr(SVAR, 'registry'):
-        SVAR.registry = {}
-    return SVAR.registry.get(name, "")
+def StatsMedian(wave):
+    """Igor StatsMedian function equivalent"""
+    return np.nanmedian(wave.data)
 
 
-# Display and UI functions (placeholders)
-def DoAlert(alert_type, message):
-    """Igor DoAlert function equivalent"""
-    import tkinter.messagebox as msgbox
-    if alert_type == 0:  # Note
-        msgbox.showinfo("Note", message)
-        return 1
-    elif alert_type == 1:  # Caution
-        result = msgbox.askyesno("Caution", message)
-        return 1 if result else 2
-    elif alert_type == 2:  # Stop
-        msgbox.showerror("Error", message)
-        return 1
-    return 1
+def Variance(wave):
+    """Igor Variance function equivalent"""
+    return np.nanvar(wave.data)
 
 
-def GetDataFolder(flag):
-    """Igor GetDataFolder function equivalent"""
-    if flag == 1:
-        return "root:"
-    return "root"
+def StdDev(wave):
+    """Igor StdDev function equivalent"""
+    return np.nanstd(wave.data)
 
 
-def SetDataFolder(path):
-    """Igor SetDataFolder function equivalent"""
-    # Placeholder - in Igor this changes the current data folder
-    pass
+# Complex number functions
+def Real(z):
+    """Igor real function equivalent"""
+    return np.real(z)
 
 
-def NewDataFolder(name):
-    """Igor NewDataFolder function equivalent"""
-    # Placeholder - in Igor this creates a new data folder
-    pass
+def Imag(z):
+    """Igor imag function equivalent"""
+    return np.imag(z)
 
 
-def KillDataFolder(path):
-    """Igor KillDataFolder function equivalent"""
-    # Placeholder - in Igor this removes a data folder
-    pass
+def Cmplx(real, imag):
+    """Igor cmplx function equivalent"""
+    return complex(real, imag)
 
 
-# Print and output functions
-def Print(*args):
-    """Igor Print function equivalent"""
-    print(*args)
+def Conj(z):
+    """Igor conj function equivalent"""
+    return np.conj(z)
 
 
-def Printf(format_string, *args):
-    """Igor Printf function equivalent"""
-    print(format_string % args)
+def Mag(z):
+    """Igor mag function equivalent (magnitude of complex)"""
+    return np.abs(z)
 
 
-def Sprintf(format_string, *args):
-    """Igor Sprintf function equivalent"""
-    return format_string % args
+def Phase(z):
+    """Igor phase function equivalent"""
+    return np.angle(z)
 
 
-# Error handling
-class IgorError(Exception):
-    """Custom exception for Igor Pro compatibility"""
-    pass
+# Utility functions
+def NaN():
+    """Igor NaN constant equivalent"""
+    return np.nan
 
 
-def Abort(message=""):
-    """Igor Abort function equivalent"""
-    if message:
-        raise IgorError(message)
+def Inf():
+    """Igor Inf constant equivalent"""
+    return np.inf
+
+
+def Pi():
+    """Igor Pi constant equivalent"""
+    return np.pi
+
+
+def E():
+    """Igor e constant equivalent"""
+    return np.e
+
+
+def NumType(wave):
+    """Igor NumType function equivalent"""
+    dtype = wave.data.dtype
+    if dtype == np.float32:
+        return 2  # NT_FP32
+    elif dtype == np.float64:
+        return 4  # NT_FP64
+    elif dtype == np.int8:
+        return 8  # NT_I8
+    elif dtype == np.int16:
+        return 16  # NT_I16
+    elif dtype == np.int32:
+        return 32  # NT_I32
+    elif dtype == np.complex64:
+        return 1  # NT_CMPLX
+    elif dtype == np.complex128:
+        return 5  # NT_CMPLX
     else:
-        raise IgorError("Operation aborted")
+        return 4  # Default to NT_FP64
 
 
-# Initialize any required global state
-def InitializeIgorCompatibility():
-    """Initialize Igor Pro compatibility layer"""
-    # Set up any global variables or state needed
-    pass
+# Curve fitting functions
+def CurveFit(fit_func, wave_x, wave_y, coef_wave, **kwargs):
+    """Igor CurveFit function equivalent (simplified)"""
+    try:
+        # Use scipy.optimize.curve_fit
+        popt, pcov = curve_fit(fit_func, wave_x.data, wave_y.data,
+                               p0=coef_wave.data if len(coef_wave.data) > 0 else None)
+
+        # Update coefficient wave
+        coef_wave.data = popt
+
+        # Return chi-square statistic (simplified)
+        residuals = wave_y.data - fit_func(wave_x.data, *popt)
+        chi_square = np.sum(residuals ** 2)
+
+        return chi_square
+
+    except Exception as e:
+        print(f"CurveFit error: {e}")
+        return np.inf
 
 
-# Call initialization
-InitializeIgorCompatibility()
+# Wave manipulation functions
+def DeletePoints(start_point, num_points, wave):
+    """Igor DeletePoints function equivalent"""
+    if wave.data.ndim == 1:
+        wave.data = np.delete(wave.data, slice(start_point, start_point + num_points))
+    else:
+        print("DeletePoints only implemented for 1D waves")
+
+
+def InsertPoints(point, num_points, wave):
+    """Igor InsertPoints function equivalent"""
+    if wave.data.ndim == 1:
+        insert_data = np.zeros(num_points)
+        wave.data = np.insert(wave.data, point, insert_data)
+    else:
+        print("InsertPoints only implemented for 1D waves")
+
+
+def Redimension(wave, *new_dimensions):
+    """Igor Redimension function equivalent"""
+    if len(new_dimensions) == 1:
+        # 1D redimension
+        new_size = new_dimensions[0]
+        if new_size > wave.data.size:
+            # Extend with zeros
+            padding = new_size - wave.data.size
+            wave.data = np.pad(wave.data.flatten(), (0, padding), 'constant')
+        else:
+            # Truncate
+            wave.data = wave.data.flatten()[:new_size]
+    else:
+        # Multi-dimensional redimension
+        try:
+            wave.data = np.resize(wave.data, new_dimensions)
+        except Exception as e:
+            print(f"Redimension error: {e}")
+
+
+# Display functions (simplified - these would typically create Igor windows)
+def Display(*waves, **kwargs):
+    """Igor Display function equivalent (simplified)"""
+    print(f"Would display waves: {[w.name for w in waves]}")
+    # In a full implementation, this would create a plot window
+
+
+def AppendToGraph(*waves, **kwargs):
+    """Igor AppendToGraph function equivalent (simplified)"""
+    print(f"Would append to graph: {[w.name for w in waves]}")
+
+
+def ModifyGraph(**kwargs):
+    """Igor ModifyGraph function equivalent (simplified)"""
+    print(f"Would modify graph with: {kwargs}")
+
+
+# String functions
+def StringFromList(position, str_list, list_sep=";"):
+    """Igor StringFromList function equivalent"""
+    items = str_list.split(list_sep)
+    if 0 <= position < len(items):
+        return items[position]
+    else:
+        return ""
+
+
+def StringMatch(string, pattern):
+    """Igor StringMatch function equivalent (simplified)"""
+    import fnmatch
+    return fnmatch.fnmatch(string, pattern)
+
+
+def StrLen(string):
+    """Igor strlen function equivalent"""
+    return len(str(string))
+
+
+def LowerStr(string):
+    """Igor LowerStr function equivalent"""
+    return str(string).lower()
+
+
+def UpperStr(string):
+    """Igor UpperStr function equivalent"""
+    return str(string).upper()
+
+
+# Igor Pro constants
+NT_FP32 = 2
+NT_FP64 = 4
+NT_I8 = 8
+NT_I16 = 16
+NT_I32 = 32
+NT_CMPLX = 1
+
+
+def Testing(string_input, number_input):
+    """Testing function for igor_compatibility module"""
+    print(f"Igor compatibility testing: {string_input}, {number_input}")
+    return len(string_input) + number_input

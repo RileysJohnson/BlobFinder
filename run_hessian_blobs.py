@@ -95,9 +95,33 @@ def check_dependencies():
         try:
             if package == 'PIL':
                 from PIL import Image
+                print(f"✓ {display_name}: Available")
+            elif package == 'igor':
+                # Check igor package more thoroughly
+                igor_available = False
+                try:
+                    import igor.binarywave as bw
+                    igor_available = True
+                except ImportError:
+                    try:
+                        import binarywave as bw
+                        igor_available = True
+                    except ImportError:
+                        try:
+                            import igor
+                            if hasattr(igor, 'load'):
+                                igor_available = True
+                        except ImportError:
+                            pass
+
+                if igor_available:
+                    print(f"✓ {display_name}: Available")
+                else:
+                    print(f"○ {display_name}: Not available")
+                    missing_optional.append(display_name)
             else:
                 __import__(package)
-            print(f"✓ {display_name}: Available")
+                print(f"✓ {display_name}: Available")
         except ImportError:
             print(f"○ {display_name}: Not available")
             missing_optional.append(display_name)
@@ -204,7 +228,7 @@ Particle Measurements Module (Minimal Implementation)
 Contains particle measurement and analysis functions
 """
 
-def MeasureParticles():
+def MeasureParticles(im, mapNum, info, particleType=1):
     """Measure particles function"""
     from tkinter import messagebox
     messagebox.showinfo("Measurements", "Particle measurement functionality not fully implemented yet.")
@@ -271,23 +295,17 @@ def print_usage_instructions():
     print("1. Load image(s) using File menu or Load buttons")
     print("2. Run 'Hessian Blob Detection' from Analysis menu")
     print("3. Set parameters in the dialog (scale start, layers, etc.)")
-    print("4. Use the Interactive Threshold window to select blob strength:")
-    print("   - Adjust the slider to see red circles around detected blobs")
-    print("   - Click 'Accept' when satisfied with the threshold")
-    print("   - Click 'Quit' to cancel")
-    print("5. View results with overlay graphics")
-    print("6. Check statistics and save results")
+    print("4. Use interactive threshold to select blob strength")
+    print("5. View results and detected particles")
     print()
     print("SUPPORTED FILE FORMATS:")
-    print("- Igor Binary Wave (.ibw) - requires 'igor' package")
-    print("- TIFF files (.tif, .tiff) - requires 'tifffile' or 'PIL'")
-    print("- PNG files (.png) - requires 'PIL'")
-    print("- JPEG files (.jpg, .jpeg) - requires 'PIL'")
+    print("• Igor Binary Wave (.ibw) - requires 'igor' package")
+    print("• TIFF (.tif, .tiff) - requires 'tifffile' or 'Pillow'")
+    print("• PNG (.png) - requires 'Pillow'")
+    print("• JPEG (.jpg, .jpeg) - requires 'Pillow'")
     print()
-    print("For questions or issues, refer to the original Igor Pro tutorial:")
-    print("'The Hessian Blob Algorithm: Precise Particle Detection in")
-    print("Atomic Force Microscopy Imagery' - Scientific Reports")
-    print("doi:10.1038/s41598-018-19379-x")
+    print("INSTALL MISSING DEPENDENCIES:")
+    print("pip install igor tifffile Pillow scikit-image")
     print("=" * 50)
     print()
 
@@ -296,32 +314,53 @@ def main():
     """Main entry point"""
     print_banner()
 
-    # Check system compatibility
+    # Check environment
     if not check_python_version():
         sys.exit(1)
 
+    print()
+
     if not check_dependencies():
-        sys.exit(1)
+        print("\nSome dependencies are missing. The application may have limited functionality.")
+        print("Install missing packages with: pip install <package_name>")
+
+        # Ask user if they want to continue
+        try:
+            response = input("\nContinue anyway? (y/N): ").strip().lower()
+            if response not in ['y', 'yes']:
+                sys.exit(1)
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted by user.")
+            sys.exit(1)
+
+    print()
 
     if not check_file_structure():
         sys.exit(1)
 
+    print()
+
     # Create missing optional modules
     create_missing_modules()
 
-    # Test core functionality
     if not test_core_functionality():
-        print("ERROR: Core functionality test failed.")
-        print("Please check your installation and try again.")
+        print("\nCore functionality test failed.")
+        print("Please check that all files are properly installed.")
         sys.exit(1)
 
+    print()
     print_usage_instructions()
 
-    # Launch the GUI
     try:
         print("Launching Hessian Blob Detection Suite...")
-        print("Close this terminal window to exit the application.")
         print()
+
+        # Test file I/O before launching GUI
+        from file_io import test_igor_package
+        if not test_igor_package():
+            print("⚠️  Igor package test failed - IBW files may not load properly")
+            print("   Try: pip install --upgrade igor")
+            print()
 
         # Import and run the main GUI
         from main_gui import main as gui_main

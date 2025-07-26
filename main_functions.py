@@ -51,80 +51,60 @@ def GetBlobDetectionParams():
     scale_frame = ttk.LabelFrame(main_frame, text="Scale-Space Parameters", padding="10")
     scale_frame.pack(fill=tk.X, pady=5)
 
-    ttk.Label(scale_frame, text="Scale Start (pixels):").grid(row=0, column=0, sticky="w", padx=5, pady=3)
-    scale_start_var = tk.StringVar(value="1")
-    ttk.Entry(scale_frame, textvariable=scale_start_var, width=15).grid(row=0, column=1, padx=5, pady=3)
+    ttk.Label(scale_frame, text="Scale Start (pixels):").grid(row=0, column=0, sticky=tk.W)
+    scale_start_var = tk.DoubleVar(value=1.0)
+    ttk.Entry(scale_frame, textvariable=scale_start_var, width=10).grid(row=0, column=1, padx=5)
 
-    ttk.Label(scale_frame, text="Layers:").grid(row=1, column=0, sticky="w", padx=5, pady=3)
-    layers_var = tk.StringVar(value="256")
-    ttk.Entry(scale_frame, textvariable=layers_var, width=15).grid(row=1, column=1, padx=5, pady=3)
+    ttk.Label(scale_frame, text="Scale Layers:").grid(row=1, column=0, sticky=tk.W)
+    scale_layers_var = tk.IntVar(value=20)
+    ttk.Entry(scale_frame, textvariable=scale_layers_var, width=10).grid(row=1, column=1, padx=5)
 
-    ttk.Label(scale_frame, text="Scale Factor:").grid(row=2, column=0, sticky="w", padx=5, pady=3)
-    scale_factor_var = tk.StringVar(value="1.5")
-    ttk.Entry(scale_frame, textvariable=scale_factor_var, width=15).grid(row=2, column=1, padx=5, pady=3)
+    ttk.Label(scale_frame, text="Scale Factor:").grid(row=2, column=0, sticky=tk.W)
+    scale_factor_var = tk.DoubleVar(value=1.2)
+    ttk.Entry(scale_frame, textvariable=scale_factor_var, width=10).grid(row=2, column=1, padx=5)
 
     # Detection parameters
     detect_frame = ttk.LabelFrame(main_frame, text="Detection Parameters", padding="10")
     detect_frame.pack(fill=tk.X, pady=5)
 
-    ttk.Label(detect_frame, text="Blob Strength:").grid(row=0, column=0, sticky="w", padx=5, pady=3)
-    thresh_var = tk.StringVar(value="-2")
-    ttk.Entry(detect_frame, textvariable=thresh_var, width=15).grid(row=0, column=1, padx=5, pady=3)
-    ttk.Label(detect_frame, text="(-2 for interactive, -1 for Otsu)",
-              font=('TkDefaultFont', 8)).grid(row=0, column=2, padx=5)
+    ttk.Label(detect_frame, text="Particle Type (-1, 0, 1):").grid(row=0, column=0, sticky=tk.W)
+    particle_type_var = tk.IntVar(value=1)
+    ttk.Entry(detect_frame, textvariable=particle_type_var, width=10).grid(row=0, column=1, padx=5)
 
-    ttk.Label(detect_frame, text="Particle Type:").grid(row=1, column=0, sticky="w", padx=5, pady=3)
-    particle_var = tk.StringVar(value="1")
-    particle_combo = ttk.Combobox(detect_frame, textvariable=particle_var, width=12)
-    particle_combo['values'] = ('1', '-1', '0')
-    particle_combo.grid(row=1, column=1, padx=5, pady=3)
-    ttk.Label(detect_frame, text="(1=positive, -1=negative, 0=both)",
-              font=('TkDefaultFont', 8)).grid(row=1, column=2, padx=5)
+    ttk.Label(detect_frame, text="Max Curvature Ratio:").grid(row=1, column=0, sticky=tk.W)
+    max_curv_var = tk.DoubleVar(value=10.0)
+    ttk.Entry(detect_frame, textvariable=max_curv_var, width=10).grid(row=1, column=1, padx=5)
 
-    ttk.Label(detect_frame, text="Max Curvature Ratio:").grid(row=2, column=0, sticky="w", padx=5, pady=3)
-    curvature_var = tk.StringVar(value="4")
-    ttk.Entry(detect_frame, textvariable=curvature_var, width=15).grid(row=2, column=1, padx=5, pady=3)
+    ttk.Label(detect_frame, text="Min Response (auto=-1):").grid(row=2, column=0, sticky=tk.W)
+    min_response_var = tk.DoubleVar(value=-1.0)
+    ttk.Entry(detect_frame, textvariable=min_response_var, width=10).grid(row=2, column=1, padx=5)
+
+    def ok_clicked():
+        result[0] = {
+            'scaleStart': scale_start_var.get(),
+            'scaleLayers': scale_layers_var.get(),
+            'scaleFactor': scale_factor_var.get(),
+            'particleType': particle_type_var.get(),
+            'maxCurvatureRatio': max_curv_var.get(),
+            'minResponse': min_response_var.get()
+        }
+        dialog.destroy()
+        root.destroy()
+
+    def cancel_clicked():
+        result[0] = None
+        dialog.destroy()
+        root.destroy()
 
     # Buttons
     button_frame = ttk.Frame(main_frame)
     button_frame.pack(pady=20)
 
-    def ok_clicked():
-        try:
-            result[0] = {
-                'scale_start': float(scale_start_var.get()),
-                'layers': int(layers_var.get()),
-                'scale_factor': float(scale_factor_var.get()),
-                'threshold': float(thresh_var.get()),
-                'particle_type': int(particle_var.get()),
-                'max_curvature_ratio': float(curvature_var.get())
-            }
-            dialog.destroy()
-        except ValueError as e:
-            messagebox.showerror("Error", f"Invalid parameter values: {str(e)}")
+    ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
 
-    def cancel_clicked():
-        result[0] = None
-        dialog.destroy()
-
-    ttk.Button(button_frame, text="Continue", command=ok_clicked, width=15).pack(side=tk.LEFT, padx=10)
-    ttk.Button(button_frame, text="Cancel", command=cancel_clicked, width=15).pack(side=tk.LEFT, padx=10)
-
-    # Center the dialog
-    dialog.update_idletasks()
-    x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
-    y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
-    dialog.geometry(f"+{x}+{y}")
-
-    # Wait for dialog to complete
-    dialog.mainloop()
-
-    # Clean up
-    try:
-        dialog.destroy()
-        root.destroy()
-    except:
-        pass
+    # Wait for user input
+    dialog.wait_window()
 
     return result[0]
 
@@ -165,496 +145,356 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     max_value = np.max(maxes_data)
     if max_value == 0:
         messagebox.showwarning("No Blobs", "No suitable blob candidates found in image.")
-        return None
+        return 0.0
 
-    # Create the interactive threshold window
-    # This replicates: NewImage/N=IMAGE im
-    threshold_window = tk.Toplevel()
-    threshold_window.title("Interactive Blob Strength Threshold")
-    threshold_window.geometry("1000x700")
-    threshold_window.transient()
-    threshold_window.grab_set()
+    # Create interactive threshold window
+    class ThresholdWindow:
+        def __init__(self):
+            self.threshold = max_value / 2.0
+            self.accepted = False
+            self.root = None
+            self.fig = None
+            self.ax = None
+            self.canvas = None
+            self.slider = None
+            self.circles = []
 
-    # Global variable for threshold (like Igor's Variable/G SS_THRESH)
-    SS_THRESH = max_value / 2
-    threshold_result = [SS_THRESH]  # Use list to allow modification in nested functions
-    window_closed = [False]
+        def create_window(self):
+            # Create new tkinter window
+            self.root = tk.Toplevel()
+            self.root.title("Interactive Blob Strength Selection")
+            self.root.geometry("800x600")
+            self.root.protocol("WM_DELETE_WINDOW", self.on_quit)
 
-    # Create matplotlib figure for image display
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+            # Create main frame
+            main_frame = ttk.Frame(self.root)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    # Display the original image
-    im_display = ax.imshow(im.data, cmap='gray', origin='lower',
-                           extent=[DimOffset(im, 0),
-                                   DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
-                                   DimOffset(im, 1),
-                                   DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1)])
-    ax.set_title("Original Image")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+            # Create matplotlib figure
+            self.fig, self.ax = plt.subplots(figsize=(8, 6))
+            self.canvas = FigureCanvasTkAgg(self.fig, main_frame)
+            self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-    # Store circle patches for updating
-    circle_patches = []
+            # Control frame
+            control_frame = ttk.Frame(main_frame)
+            control_frame.pack(fill=tk.X, pady=5)
 
-    def update_threshold_display(thresh_val):
-        """Update the display with circles for blobs above threshold"""
-        # Clear existing circles (like Igor's SetDrawLayer/K /W=IMAGE overlay)
-        for patch in circle_patches:
-            patch.remove()
-        circle_patches.clear()
+            # Threshold controls
+            ttk.Label(control_frame, text="Blob Strength Threshold:").pack(side=tk.LEFT)
 
-        # Draw circles for blobs above threshold
-        # This replicates the Igor Pro InteractiveSlider function logic
-        thresh_squared = thresh_val ** 2
+            self.threshold_var = tk.DoubleVar(value=self.threshold)
+            self.threshold_entry = ttk.Entry(control_frame, textvariable=self.threshold_var, width=15)
+            self.threshold_entry.pack(side=tk.LEFT, padx=5)
+            self.threshold_entry.bind('<Return>', self.on_entry_change)
 
-        for i in range(SS_MAXMAP.data.shape[0]):
-            for j in range(SS_MAXMAP.data.shape[1]):
-                # If(Map[i][j]>S_STruct.curval^2)
-                if SS_MAXMAP.data[i, j] > thresh_squared:
-                    # Calculate radius from scale (matches Igor Pro logic)
-                    scale_idx = int(SS_MAXSCALEMAP.data[i, j])
-                    if 0 <= scale_idx < detH.data.shape[2]:
-                        # rad = Sqrt(2*Exp(DimOffset(detH,2)+ScaleMap[i][j]*DimDelta(detH,2)))
-                        scale_value = np.exp(DimOffset(detH, 2) + scale_idx * DimDelta(detH, 2))
-                        rad = np.sqrt(2 * scale_value)
+            # Slider
+            slider_frame = ttk.Frame(main_frame)
+            slider_frame.pack(fill=tk.X, pady=5)
 
-                        # Convert to real coordinates
-                        # IMPORTANT: Igor Pro uses (i,j) as (row,col) but displays as (x,y)
-                        # xc = DimOffset(map,0)+i*DimDelta(map,0)
-                        # yc = DimOffset(map,1)+j*DimDelta(map,1)
-                        xc = DimOffset(SS_MAXMAP, 0) + j * DimDelta(SS_MAXMAP, 0)  # j for x
-                        yc = DimOffset(SS_MAXMAP, 1) + i * DimDelta(SS_MAXMAP, 1)  # i for y
+            ttk.Label(slider_frame, text="0.0").pack(side=tk.LEFT)
+            self.slider_var = tk.DoubleVar(value=self.threshold)
+            self.slider = ttk.Scale(slider_frame, from_=0.0, to=max_value * 1.1,
+                                    variable=self.slider_var, orient=tk.HORIZONTAL,
+                                    command=self.on_slider_change)
+            self.slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            ttk.Label(slider_frame, text=f"{max_value * 1.1:.3f}").pack(side=tk.LEFT)
 
-                        # SetDrawEnv xcoord= bottom,ycoord= left,linefgc= (65535,0,0)
-                        # DrawOval xc-rad,yc-rad,xc+rad,yc+rad
-                        circle = Circle((xc, yc), rad, fill=False, color='red', linewidth=2)
-                        ax.add_patch(circle)
-                        circle_patches.append(circle)
+            # Buttons
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(fill=tk.X, pady=10)
 
-        # Update title with current threshold
-        ax.set_title(f"Blobs Above Threshold (Strength: {thresh_val:.6f})")
-        fig.canvas.draw()
+            ttk.Button(button_frame, text="Accept", command=self.on_accept).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Quit", command=self.on_quit).pack(side=tk.LEFT, padx=5)
 
-    # Create tkinter frame for matplotlib
-    canvas = FigureCanvasTkAgg(fig, threshold_window)
-    canvas.draw()
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            # Initial plot
+            self.update_display()
 
-    # Control panel (replicates Igor's NewPanel/EXT=0 /HOST=IMAGE /N=SubControl)
-    control_frame = tk.Frame(threshold_window, bg='lightgray')
-    control_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+        def update_display(self):
+            """Update the display with current threshold"""
+            self.ax.clear()
 
-    # Accept and Quit buttons (matches Igor Pro layout)
-    def InteractiveContinue():
-        """Replicates Igor Pro InteractiveContinue function"""
-        window_closed[0] = True
-        threshold_window.destroy()
+            # Display image
+            extent = [DimOffset(im, 0),
+                      DimOffset(im, 0) + im.data.shape[1] * DimDelta(im, 0),
+                      DimOffset(im, 1) + im.data.shape[0] * DimDelta(im, 1),
+                      DimOffset(im, 1)]
 
-    def InteractiveQuit():
-        """Replicates Igor Pro InteractiveQuit function"""
-        threshold_result[0] = None
-        window_closed[0] = True
-        threshold_window.destroy()
+            self.ax.imshow(im.data, extent=extent, cmap='gray', origin='lower')
+            self.ax.set_title(f"Interactive Blob Strength Selection\nThreshold: {self.threshold:.6f}")
+            self.ax.set_xlabel("X (pixels)")
+            self.ax.set_ylabel("Y (pixels)")
 
-    # Button layout matches Igor Pro: Accept at (0,0), Quit at (100,0)
-    btn_frame = tk.Frame(control_frame)
-    btn_frame.pack(side=tk.LEFT)
+            # Draw circles for blobs above threshold
+            threshold_squared = self.threshold ** 2
 
-    accept_btn = tk.Button(btn_frame, text="Accept", command=InteractiveContinue,
-                           width=12, height=2, bg='lightblue')
-    accept_btn.pack(side=tk.LEFT, padx=2)
+            for i in range(SS_MAXMAP.data.shape[0]):
+                for j in range(SS_MAXMAP.data.shape[1]):
+                    if SS_MAXMAP.data[i, j] > threshold_squared:
+                        # Calculate position in real coordinates
+                        xc = DimOffset(SS_MAXMAP, 0) + j * DimDelta(SS_MAXMAP, 0)
+                        yc = DimOffset(SS_MAXMAP, 1) + i * DimDelta(SS_MAXMAP, 1)
 
-    quit_btn = tk.Button(btn_frame, text="Quit", command=InteractiveQuit,
-                         width=12, height=2, bg='lightcoral')
-    quit_btn.pack(side=tk.LEFT, padx=2)
+                        # Get radius from scale map
+                        rad = SS_MAXSCALEMAP.data[i, j] if SS_MAXSCALEMAP.data[i, j] > 0 else 2.0
 
-    # Threshold display and controls
-    thresh_frame = tk.Frame(control_frame)
-    thresh_frame.pack(side=tk.LEFT, padx=20)
+                        # Draw circle
+                        circle = Circle((xc, yc), rad, fill=False, color='red', linewidth=1.5)
+                        self.ax.add_patch(circle)
 
-    tk.Label(thresh_frame, text="Blob Strength:", font=('TkDefaultFont', 10, 'bold')).pack()
+            self.canvas.draw()
 
-    # SetVariable ThreshSetVar (matches Igor Pro)
-    thresh_var = tk.StringVar(value=f"{SS_THRESH:.6e}")
-    thresh_entry = tk.Entry(thresh_frame, textvariable=thresh_var, width=15)
-    thresh_entry.pack(pady=2)
+        def on_slider_change(self, value):
+            """Handle slider value change"""
+            self.threshold = float(value)
+            self.threshold_var.set(self.threshold)
+            self.update_display()
 
-    def update_from_entry():
-        """Update threshold from text entry"""
-        try:
-            new_thresh = float(thresh_var.get())
-            if 0 <= new_thresh <= max_value * 1.1:
-                threshold_result[0] = new_thresh
-                slider.set(new_thresh)
-                update_threshold_display(new_thresh)
-        except ValueError:
-            thresh_var.set(f"{threshold_result[0]:.6e}")
+        def on_entry_change(self, event):
+            """Handle entry value change"""
+            try:
+                self.threshold = self.threshold_var.get()
+                self.slider_var.set(self.threshold)
+                self.update_display()
+            except tk.TclError:
+                pass  # Invalid value, ignore
 
-    thresh_entry.bind('<Return>', lambda e: update_from_entry())
+        def on_accept(self):
+            """Accept current threshold"""
+            self.accepted = True
+            self.root.quit()
+            self.root.destroy()
 
-    # Slider ThreshSlide (matches Igor Pro slider configuration)
-    slider_frame = tk.Frame(control_frame)
-    slider_frame.pack(side=tk.LEFT, padx=20, fill=tk.X, expand=True)
+        def on_quit(self):
+            """Quit without accepting"""
+            self.accepted = False
+            self.root.quit()
+            self.root.destroy()
 
-    tk.Label(slider_frame, text="Threshold Slider:", font=('TkDefaultFont', 10, 'bold')).pack()
+    # Create and run threshold window
+    threshold_window = ThresholdWindow()
+    threshold_window.create_window()
+    threshold_window.root.mainloop()
 
-    # Slider limits={0,WaveMax(Maxes)*1.1,WaveMax(Maxes)*1.1/200}
-    slider = tk.Scale(slider_frame, from_=0, to=max_value * 1.1,
-                      resolution=max_value * 1.1 / 200,
-                      orient=tk.HORIZONTAL, length=300,
-                      command=lambda val: InteractiveSlider(float(val)))
-    slider.set(SS_THRESH)
-    slider.pack(pady=5)
-
-    def InteractiveSlider(val):
-        """
-        Replicates Igor Pro InteractiveSlider function
-        Updates display when slider moves
-        """
-        threshold_result[0] = val
-        thresh_var.set(f"{val:.6e}")
-        update_threshold_display(val)
-
-    # Initial display update
-    update_threshold_display(SS_THRESH)
-
-    # Let the user pick the appropriate threshold (replicates PauseForUser IMAGE)
-    threshold_window.wait_window()
-
-    # Return the selected threshold value
-    returnVal = threshold_result[0] if not window_closed[0] or threshold_result[0] is not None else None
-
-    # Clean up (replicates KillVariables/Z SS_THRESH; KillWaves/Z Map)
-    try:
-        plt.close(fig)
-    except:
-        pass
-
-    print(f"Interactive threshold selection completed. Selected threshold: {returnVal}")
-    return returnVal
-
-
-def BatchHessianBlobs(images_folder=None):
-    """
-    Detects Hessian blobs in a series of images in a chosen data folder.
-    Direct port from Igor Pro BatchHessianBlobs function
-    """
-    if images_folder is None:
-        ImagesDF = GetBrowserSelection(0)
-        CurrentDF = GetDataFolder(1)
-
-        if not DataFolderExists(ImagesDF) or CountObjects(ImagesDF, 1) < 1:
-            messagebox.showerror("Error",
-                                 "Select the folder with your images in it in the data browser, then try again.")
-            return ""
+    if threshold_window.accepted:
+        return threshold_window.threshold
     else:
-        ImagesDF = images_folder
-        CurrentDF = "root:"
-
-    # Get parameters from user
-    params = GetBlobDetectionParams()
-    if params is None:
-        return ""  # User cancelled
-
-    scaleStart = params['scale_start']  # In pixel units
-    layers = params['layers']
-    scaleFactor = params['scale_factor']
-    detHResponseThresh = params['threshold']  # Use -1 for Otsu's method, -2 for interactive
-    particleType = params['particle_type']  # -1 for neg only, 1 for pos only, 0 for both
-    maxCurvatureRatio = params['max_curvature_ratio']
-
-    # Additional parameters (fixed for now)
-    subPixelMult = 1  # 1 or more, should be integer
-    allowOverlap = 0
-
-    # Get constraints if desired
-    minH = -np.inf
-    maxH = np.inf
-    minV = -np.inf
-    maxV = np.inf
-    minA = -np.inf
-    maxA = np.inf
-
-    response = messagebox.askyesnocancel("Constraints",
-                                         "Would you like to limit the analysis to particles of certain height, volume, or area?")
-
-    if response is None:  # Cancel
-        return ""
-    elif response:  # Yes
-        constraints = GetConstraints()
-        if constraints:
-            minH, maxH, minV, maxV, minA, maxA = constraints
-        else:
-            return ""  # User cancelled
-
-    # Process images
-    print("Starting batch Hessian blob detection...")
-
-    # Create results folder
-    results_folder = NewDataFolder("HessianBlobResults")
-
-    # Get list of images to process
-    images = []
-    if hasattr(images_folder, 'waves'):
-        images = list(images_folder.waves.values())
-    else:
-        # Get from data browser
-        folder = data_browser.get_folder(ImagesDF.rstrip(':'))
-        images = list(folder.waves.values())
-
-    num_images = len(images)
-    print(f"Processing {num_images} images...")
-
-    # Process each image
-    for idx, im in enumerate(images):
-        print(f"\nProcessing image {idx + 1}/{num_images}: {im.name}")
-
-        try:
-            # Create scale-space representation
-            t0 = scaleStart
-            L = ScaleSpaceRepresentation(im, layers, t0, scaleFactor)
-
-            # Compute blob detectors
-            detH, LG = BlobDetectors(L, True)
-
-            # Get threshold
-            if detHResponseThresh == -2:
-                # Interactive threshold
-                threshold = InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio)
-                if threshold is None:
-                    print(f"Skipping {im.name} - threshold selection cancelled")
-                    continue
-            elif detHResponseThresh == -1:
-                # Otsu's method
-                threshold = OtsuThreshold(detH, particleType)
-            else:
-                threshold = detHResponseThresh
-
-            # Find blobs
-            mapNum = Duplicate(im, f"{im.name}_mapNum")
-            mapNum.data = np.full(im.data.shape, -1)
-
-            mapDetH = Duplicate(im, f"{im.name}_mapDetH")
-            mapDetH.data = np.zeros(im.data.shape)
-
-            mapMax = Duplicate(im, f"{im.name}_mapMax")
-            mapMax.data = np.zeros(im.data.shape)
-
-            info = Wave(np.zeros((0, 20)), f"{im.name}_info")
-
-            numParticles = FindHessianBlobs(im, detH, LG, threshold, mapNum, mapDetH,
-                                            mapMax, info, particleType, maxCurvatureRatio)
-
-            print(f"Found {numParticles} particles in {im.name}")
-
-            # Apply constraints if any
-            if minH != -np.inf or maxH != np.inf or minV != -np.inf or maxV != np.inf or minA != -np.inf or maxA != np.inf:
-                # Filter particles based on constraints
-                # This would be implemented in particle filtering function
-                pass
-
-            # Store results
-            results_folder.add_wave(mapNum)
-            results_folder.add_wave(mapDetH)
-            results_folder.add_wave(mapMax)
-            results_folder.add_wave(info)
-
-        except Exception as e:
-            print(f"Error processing {im.name}: {str(e)}")
-            continue
-
-    print("\nBatch processing completed!")
-    return results_folder.name
+        return 0.0
 
 
-def GetConstraints():
+def FindHessianBlobs(im, detH, LG, minResponse, mapNum, mapLG, mapMax, info, particleType, maxCurvatureRatio):
     """
-    Get particle constraints from user
-    Replicates Igor Pro constraint dialog
-    """
-    root = tk.Tk()
-    root.withdraw()
-
-    dialog = tk.Toplevel()
-    dialog.title("Particle Constraints")
-    dialog.geometry("450x300")
-    dialog.transient()
-    dialog.grab_set()
-    dialog.focus_set()
-
-    result = [None]
-
-    main_frame = ttk.Frame(dialog, padding="20")
-    main_frame.pack(fill=tk.BOTH, expand=True)
-
-    ttk.Label(main_frame, text="Particle Constraints",
-              font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
-
-    # Create constraint entry fields
-    constraints_frame = ttk.Frame(main_frame)
-    constraints_frame.pack(fill=tk.X)
-
-    # Headers
-    ttk.Label(constraints_frame, text="Parameter", font=('TkDefaultFont', 10, 'bold')).grid(
-        row=0, column=0, sticky="w", padx=5, pady=5)
-    ttk.Label(constraints_frame, text="Min", font=('TkDefaultFont', 10, 'bold')).grid(
-        row=0, column=1, padx=5, pady=5)
-    ttk.Label(constraints_frame, text="Max", font=('TkDefaultFont', 10, 'bold')).grid(
-        row=0, column=2, padx=5, pady=5)
-
-    row = 1
-
-    # Height constraints
-    ttk.Label(constraints_frame, text="Height:").grid(row=row, column=0, sticky="w", padx=5, pady=3)
-    min_h_var = tk.StringVar(value="-inf")
-    max_h_var = tk.StringVar(value="inf")
-    ttk.Entry(constraints_frame, textvariable=min_h_var, width=12).grid(row=row, column=1, padx=5, pady=3)
-    ttk.Entry(constraints_frame, textvariable=max_h_var, width=12).grid(row=row, column=2, padx=5, pady=3)
-    row += 1
-
-    # Volume constraints
-    ttk.Label(constraints_frame, text="Volume:").grid(row=row, column=0, sticky="w", padx=5, pady=3)
-    min_v_var = tk.StringVar(value="-inf")
-    max_v_var = tk.StringVar(value="inf")
-    ttk.Entry(constraints_frame, textvariable=min_v_var, width=12).grid(row=row, column=1, padx=5, pady=3)
-    ttk.Entry(constraints_frame, textvariable=max_v_var, width=12).grid(row=row, column=2, padx=5, pady=3)
-    row += 1
-
-    # Area constraints
-    ttk.Label(constraints_frame, text="Area:").grid(row=row, column=0, sticky="w", padx=5, pady=3)
-    min_a_var = tk.StringVar(value="-inf")
-    max_a_var = tk.StringVar(value="inf")
-    ttk.Entry(constraints_frame, textvariable=min_a_var, width=12).grid(row=row, column=1, padx=5, pady=3)
-    ttk.Entry(constraints_frame, textvariable=max_a_var, width=12).grid(row=row, column=2, padx=5, pady=3)
-
-    def parse_constraint(value):
-        """Parse constraint value, handling 'inf' and '-inf'"""
-        val = value.strip().lower()
-        if val == 'inf':
-            return np.inf
-        elif val == '-inf':
-            return -np.inf
-        else:
-            return float(val)
-
-    def ok_clicked():
-        try:
-            result[0] = (
-                parse_constraint(min_h_var.get()),
-                parse_constraint(max_h_var.get()),
-                parse_constraint(min_v_var.get()),
-                parse_constraint(max_v_var.get()),
-                parse_constraint(min_a_var.get()),
-                parse_constraint(max_a_var.get())
-            )
-            dialog.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", f"Invalid constraint values: {str(e)}")
-
-    def cancel_clicked():
-        result[0] = None
-        dialog.destroy()
-
-    # Buttons
-    button_frame = ttk.Frame(main_frame)
-    button_frame.pack(pady=20)
-
-    ttk.Button(button_frame, text="Continue", command=ok_clicked, width=15).pack(side=tk.LEFT, padx=10)
-    ttk.Button(button_frame, text="Cancel", command=cancel_clicked, width=15).pack(side=tk.LEFT, padx=10)
-
-    # Center the dialog
-    dialog.update_idletasks()
-    x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
-    y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
-    dialog.geometry(f"+{x}+{y}")
-
-    # Wait for dialog to complete
-    dialog.mainloop()
-
-    # Clean up
-    try:
-        dialog.destroy()
-        root.destroy()
-    except:
-        pass
-
-    return result[0]
-
-
-def OtsuThreshold(detH, particleType):
-    """
-    Calculate Otsu's threshold for blob detection
-    Direct port from Igor Pro implementation
+    Find Hessian blobs using the detector responses
+    Direct port from Igor Pro FindHessianBlobs function
 
     Parameters:
-    detH : Wave - Determinant of Hessian detector response
-    particleType : int - Type of particles to consider
+    im : Wave - The image under analysis
+    detH : Wave - The determinant of Hessian blob detector
+    LG : Wave - The Laplacian of Gaussian blob detector
+    minResponse : float - Minimum detector response threshold
+    mapNum : Wave - Output particle number map
+    mapLG : Wave - Output Laplacian of Gaussian map
+    mapMax : Wave - Output maximum detector response map
+    info : Wave - Output particle information array
+    particleType : int - Type of particles to detect (-1, 0, 1)
+    maxCurvatureRatio : float - Maximum ratio of principal curvatures
 
     Returns:
-    float - Otsu threshold in image units
+    int - Number of particles found
     """
-    # Flatten the 3D detector response
-    data = detH.data.flatten()
+    print(f"Finding Hessian blobs with minResponse={minResponse}")
 
-    # Filter based on particle type
-    if particleType == 1:
-        data = data[data > 0]
-    elif particleType == -1:
-        data = -data[data < 0]
+    # Square the minResponse since it's provided as square root
+    minResponse_squared = minResponse ** 2
 
-    if len(data) == 0:
-        return 0
+    # Initialize maps
+    mapNum.data = np.full(im.data.shape, -1.0)
+    mapLG.data = np.zeros(im.data.shape)
+    mapMax.data = np.zeros(im.data.shape)
 
-    # Calculate histogram
-    hist, bin_edges = np.histogram(data, bins=256)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    particle_count = 0
+    particle_list = []
 
-    # Calculate Otsu's threshold
-    total = np.sum(hist)
-    sum_total = np.sum(hist * bin_centers)
+    # Search through all positions and scales
+    for k in range(1, detH.data.shape[2] - 1):  # Scale dimension
+        for i in range(1, detH.data.shape[0] - 1):  # Y dimension
+            for j in range(1, detH.data.shape[1] - 1):  # X dimension
 
-    sum_bg = 0
-    weight_bg = 0
-    max_variance = 0
-    threshold = 0
+                current_detH = detH.data[i, j, k]
+                current_LG = LG.data[i, j, k]
 
-    for i in range(256):
-        weight_bg += hist[i]
-        if weight_bg == 0:
-            continue
+                # Check minimum response
+                if current_detH < minResponse_squared:
+                    continue
 
-        weight_fg = total - weight_bg
-        if weight_fg == 0:
-            break
+                # Check curvature ratio
+                if current_LG != 0 and current_detH != 0:
+                    curvature_ratio = (current_LG ** 2) / current_detH
+                    max_allowed = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
+                    if curvature_ratio >= max_allowed:
+                        continue
 
-        sum_bg += hist[i] * bin_centers[i]
-        mean_bg = sum_bg / weight_bg
-        mean_fg = (sum_total - sum_bg) / weight_fg
+                # Check particle type
+                if ((particleType == -1 and current_LG >= 0) or
+                        (particleType == 1 and current_LG <= 0)):
+                    continue
 
-        # Calculate between-class variance
-        variance = weight_bg * weight_fg * (mean_bg - mean_fg) ** 2
+                # Check if it's a local maximum in 3D (26 neighbors)
+                is_maximum = True
 
-        if variance > max_variance:
-            max_variance = variance
-            threshold = bin_centers[i]
+                # Check strictly greater neighbors (to avoid ties)
+                neighbors_strict = [
+                    detH.data[i - 1, j - 1, k - 1], detH.data[i - 1, j - 1, k], detH.data[i - 1, j, k - 1],
+                    detH.data[i, j - 1, k - 1], detH.data[i, j, k - 1], detH.data[i, j - 1, k], detH.data[i - 1, j, k]
+                ]
 
-    # Convert to image units (square root)
-    return np.sqrt(threshold)
+                for neighbor in neighbors_strict:
+                    if current_detH <= neighbor:
+                        is_maximum = False
+                        break
+
+                if not is_maximum:
+                    continue
+
+                # Check greater or equal neighbors
+                neighbors_equal = [
+                    detH.data[i - 1, j - 1, k + 1], detH.data[i - 1, j, k + 1], detH.data[i - 1, j + 1, k - 1],
+                    detH.data[i - 1, j + 1, k], detH.data[i - 1, j + 1, k + 1], detH.data[i, j - 1, k + 1],
+                    detH.data[i, j, k + 1], detH.data[i, j + 1, k - 1], detH.data[i, j + 1, k],
+                    detH.data[i, j + 1, k + 1], detH.data[i + 1, j - 1, k - 1], detH.data[i + 1, j - 1, k],
+                    detH.data[i + 1, j - 1, k + 1], detH.data[i + 1, j, k - 1], detH.data[i + 1, j, k],
+                    detH.data[i + 1, j, k + 1], detH.data[i + 1, j + 1, k - 1], detH.data[i + 1, j + 1, k],
+                    detH.data[i + 1, j + 1, k + 1]
+                ]
+
+                for neighbor in neighbors_equal:
+                    if current_detH < neighbor:
+                        is_maximum = False
+                        break
+
+                if not is_maximum:
+                    continue
+
+                # Found a valid blob!
+                # Store particle information
+                particle_info = {
+                    'x': j, 'y': i, 'scale': k,
+                    'detH': current_detH,
+                    'LG': current_LG,
+                    'x_coord': DimOffset(im, 0) + j * DimDelta(im, 0),
+                    'y_coord': DimOffset(im, 1) + i * DimDelta(im, 1),
+                    'scale_coord': DimOffset(detH, 2) + k * DimDelta(detH, 2)
+                }
+                particle_list.append(particle_info)
+
+                # Update maps
+                mapNum.data[i, j] = particle_count
+                mapLG.data[i, j] = current_LG
+                mapMax.data[i, j] = max(mapMax.data[i, j], current_detH)
+
+                particle_count += 1
+
+    # Update info wave with particle data
+    if particle_count > 0:
+        info.data = np.zeros((particle_count, 10))  # 10 columns for particle properties
+        for idx, particle in enumerate(particle_list):
+            info.data[idx, 0] = particle['x_coord']  # X position
+            info.data[idx, 1] = particle['y_coord']  # Y position
+            info.data[idx, 2] = particle['scale_coord']  # Scale
+            info.data[idx, 3] = particle['detH']  # DetH response
+            info.data[idx, 4] = particle['LG']  # LG response
+            info.data[idx, 5] = particle['x']  # X index
+            info.data[idx, 6] = particle['y']  # Y index
+            info.data[idx, 7] = particle['scale']  # Scale index
+            info.data[idx, 8] = 0  # Area (to be computed)
+            info.data[idx, 9] = 0  # Volume (to be computed)
+
+    print(f"Found {particle_count} Hessian blobs")
+    return particle_count
 
 
-def Testing(input_string, input_number):
+def RunHessianBlobs(im, scaleStart=1.0, scaleLayers=20, scaleFactor=1.2,
+                    particleType=1, maxCurvatureRatio=10.0, minResponse=-1.0,
+                    interactive=True):
     """
-    Testing function - replicates Igor Pro Testing function
+    Main function to run complete Hessian blob analysis
+    Direct port from Igor Pro RunHessianBlobs function
+
+    Parameters:
+    im : Wave - Input image
+    scaleStart : float - Starting scale in pixels
+    scaleLayers : int - Number of scale layers
+    scaleFactor : float - Factor between scale layers
+    particleType : int - Type of particles to detect
+    maxCurvatureRatio : float - Maximum curvature ratio
+    minResponse : float - Minimum response (-1 for interactive)
+    interactive : bool - Use interactive threshold selection
+
+    Returns:
+    dict - Results containing all output waves and statistics
     """
-    print(f"Testing function called with string: '{input_string}' and number: {input_number}")
+    print("=== Running Hessian Blob Analysis ===")
+    print(f"Image: {im.name}, Shape: {im.data.shape}")
+    print(f"Parameters: scaleStart={scaleStart}, layers={scaleLayers}, factor={scaleFactor}")
+    print(f"Particle type={particleType}, maxCurvRatio={maxCurvatureRatio}")
 
-    # Create a simple test result
-    result = len(input_string) + input_number
+    # Step 1: Compute scale-space representation
+    print("\n1. Computing scale-space representation...")
+    L = ScaleSpaceRepresentation(im, scaleLayers, scaleStart, scaleFactor)
 
-    messagebox.showinfo("Testing",
-                        f"Function executed successfully!\n"
-                        f"String: {input_string}\n"
-                        f"Number: {input_number}\n"
-                        f"Result: {result}")
+    # Step 2: Compute blob detectors
+    print("\n2. Computing blob detectors...")
+    detH, LG = BlobDetectors(L, gammaNorm=1.0)
 
-    return result
+    # Step 3: Get threshold (interactive or provided)
+    if interactive or minResponse < 0:
+        print("\n3. Interactive threshold selection...")
+        threshold = InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio)
+        if threshold <= 0:
+            print("Analysis cancelled by user.")
+            return None
+        minResponse = threshold
+    else:
+        print(f"\n3. Using provided threshold: {minResponse}")
+
+    # Step 4: Create output waves
+    print("\n4. Creating output waves...")
+    mapNum = Duplicate(im, f"{im.name}_mapNum")
+    mapLG = Duplicate(im, f"{im.name}_mapLG")
+    mapMax = Duplicate(im, f"{im.name}_mapMax")
+    info = Wave(np.array([]), f"{im.name}_info")
+
+    # Step 5: Find blobs
+    print("\n5. Finding blobs...")
+    num_particles = FindHessianBlobs(im, detH, LG, minResponse, mapNum, mapLG, mapMax,
+                                     info, particleType, maxCurvatureRatio)
+
+    # Step 6: Prepare results
+    results = {
+        'image': im,
+        'scale_space': L,
+        'detH': detH,
+        'LG': LG,
+        'mapNum': mapNum,
+        'mapLG': mapLG,
+        'mapMax': mapMax,
+        'info': info,
+        'num_particles': num_particles,
+        'threshold': minResponse,
+        'parameters': {
+            'scaleStart': scaleStart,
+            'scaleLayers': scaleLayers,
+            'scaleFactor': scaleFactor,
+            'particleType': particleType,
+            'maxCurvatureRatio': maxCurvatureRatio,
+            'minResponse': minResponse
+        }
+    }
+
+    print(f"\n=== Analysis Complete: Found {num_particles} particles ===")
+    return results
+
+
+def Testing(string_input, number_input):
+    """Testing function for main_functions module"""
+    print(f"Main functions testing: {string_input}, {number_input}")
+    return len(string_input) + number_input
