@@ -53,44 +53,39 @@ def MeasureParticles(im, info):
         y_coord = info.data[i, 1]
         radius = info.data[i, 2]
 
-        # Convert coordinates to indices
-        x_idx = int((x_coord - DimOffset(im, 1)) / DimDelta(im, 1))
-        y_idx = int((y_coord - DimOffset(im, 0)) / DimDelta(im, 0))
-        radius_pixels = radius / min(DimDelta(im, 0), DimDelta(im, 1))
+        # Convert coordinates to pixel indices
+        x_pixel = (x_coord - DimOffset(im, 1)) / DimDelta(im, 1)
+        y_pixel = (y_coord - DimOffset(im, 0)) / DimDelta(im, 0)
 
-        # Define region around particle
-        x_min = max(0, x_idx - int(radius_pixels) - 1)
-        x_max = min(im.data.shape[1], x_idx + int(radius_pixels) + 1)
-        y_min = max(0, y_idx - int(radius_pixels) - 1)
-        y_max = min(im.data.shape[0], y_idx + int(radius_pixels) + 1)
+        # Create circular mask around particle
+        height, width = im.data.shape
+        y_indices, x_indices = np.mgrid[0:height, 0:width]
+        distances = np.sqrt((x_indices - x_pixel) ** 2 + (y_indices - y_pixel) ** 2)
 
-        # Extract region
-        region = im.data[y_min:y_max, x_min:x_max]
+        # Convert radius to pixels
+        radius_pixels = radius / DimDelta(im, 1)  # Assuming isotropic pixels
+        mask = distances <= radius_pixels
 
-        # Create coordinate arrays for this region
-        y_coords = np.arange(y_min, y_max)
-        x_coords = np.arange(x_min, x_max)
-        Y, X = np.meshgrid(y_coords, x_coords, indexing='ij')
+        if np.any(mask):
+            # Extract region data
+            region = im.data * mask
 
-        # Create mask for circular region
-        center_y, center_x = y_idx, x_idx
-        dist_sq = (Y - center_y) ** 2 + (X - center_x) ** 2
-        mask = dist_sq <= radius_pixels ** 2
+            # Calculate area in physical units
+            pixel_area = DimDelta(im, 0) * DimDelta(im, 1)
+            area_physical = np.sum(mask) * pixel_area
 
-        if np.sum(mask) > 0:
-            # Measure area (number of pixels)
-            area_pixels = np.sum(mask)
-            area_physical = area_pixels * DimDelta(im, 0) * DimDelta(im, 1)
+            # Calculate volume (sum of intensities * pixel area)
+            total_intensity = np.sum(region)
+            volume = total_intensity * pixel_area
 
-            # Measure height (max intensity in region)
-            height = np.max(region[mask])
+            # Calculate height (maximum intensity in region)
+            height = np.max(im.data[mask]) if np.any(mask) else 0
 
-            # Measure volume (integrated intensity)
-            volume = np.sum(region[mask]) * DimDelta(im, 0) * DimDelta(im, 1)
-
-            # Measure center of mass
-            total_intensity = np.sum(region[mask])
+            # Calculate center of mass in physical coordinates
             if total_intensity > 0:
+                Y = DimOffset(im, 0) + y_indices * DimDelta(im, 0)
+                X = DimOffset(im, 1) + x_indices * DimDelta(im, 1)
+
                 com_y = np.sum(Y[mask] * region[mask]) / total_intensity
                 com_x = np.sum(X[mask] * region[mask]) / total_intensity
 
@@ -130,6 +125,18 @@ def ViewParticles(im, info, mapNum=None):
     info : Wave - Particle information array
     mapNum : Wave - Particle number map (optional)
     """
+    # FIXED: Add proper validation to prevent NoneType errors
+    if im is None:
+        messagebox.showerror("Error", "No image provided.")
+        return
+
+    if info is None:
+        messagebox.showerror("Error", "No particle information provided.")
+        return
+
+    if not hasattr(info, 'data') or info.data is None:
+        messagebox.showerror("Error", "Particle information has no data attribute.")
+        return
 
     if info.data.shape[0] == 0:
         messagebox.showinfo("No Particles", "No particles to view.")
@@ -182,96 +189,100 @@ def ViewParticles(im, info, mapNum=None):
             self.particle_label = ttk.Label(right_frame,
                                             text=f"Particle {self.current_particle + 1}",
                                             font=('TkDefaultFont', 15, 'bold'))
-            self.particle_label.pack(pady=(10, 5))
+            self.particle_label.pack(pady=(20, 10))
 
             # Navigation buttons - matches Igor Pro NextBtn/PrevBtn
             nav_frame = ttk.Frame(right_frame)
-            nav_frame.pack(fill=tk.X, padx=10, pady=5)
+            nav_frame.pack(pady=(0, 10))
 
-            ttk.Button(nav_frame, text="Prev", command=self.prev_particle, width=8).pack(side=tk.LEFT)
-            ttk.Button(nav_frame, text="Next", command=self.next_particle, width=8).pack(side=tk.RIGHT)
+            self.prev_btn = ttk.Button(nav_frame, text="Prev", command=self.prev_particle)
+            self.prev_btn.pack(side=tk.LEFT, padx=(10, 5))
+
+            self.next_btn = ttk.Button(nav_frame, text="Next", command=self.next_particle)
+            self.next_btn.pack(side=tk.LEFT, padx=(5, 10))
 
             # Go To control - matches Igor Pro GoTo SetVariable
             goto_frame = ttk.Frame(right_frame)
-            goto_frame.pack(fill=tk.X, padx=10, pady=5)
+            goto_frame.pack(pady=(0, 10))
 
             ttk.Label(goto_frame, text="Go To:").pack()
-            self.goto_var = tk.IntVar(value=self.current_particle)
-            goto_entry = ttk.Entry(goto_frame, textvariable=self.goto_var, width=10)
-            goto_entry.pack()
-            goto_entry.bind('<Return>', self.goto_particle)
+            self.goto_var = tk.IntVar(value=0)
+            self.goto_entry = ttk.Entry(goto_frame, textvariable=self.goto_var, width=10)
+            self.goto_entry.pack()
+            self.goto_entry.bind('<Return>', self.goto_particle)
 
-            # Color table popup - matches Igor Pro ColorTab PopUpMenu
+            # Color table selection - matches Igor Pro ColorTab PopUpMenu
             color_frame = ttk.Frame(right_frame)
-            color_frame.pack(fill=tk.X, padx=10, pady=5)
+            color_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
 
-            ttk.Label(color_frame, text="Color Table:").pack()
-            self.color_var = tk.StringVar(value=self.color_table)
+            self.color_var = tk.StringVar(value="Grays")
             color_combo = ttk.Combobox(color_frame, textvariable=self.color_var,
-                                       values=["Grays", "Rainbow", "BlueRedGreen", "Terrain"],
-                                       width=12, state="readonly")
+                                       values=["Grays", "Rainbow", "BlueRedYellow"],
+                                       state="readonly", width=15)
             color_combo.pack()
-            color_combo.bind('<<ComboboxSelected>>', self.change_color_table)
+            color_combo.bind('<<ComboboxSelected>>', self.on_color_change)
 
-            # Color range control - matches Igor Pro ColorRange SetVariable
-            color_range_frame = ttk.Frame(right_frame)
-            color_range_frame.pack(fill=tk.X, padx=10, pady=5)
-
-            ttk.Label(color_range_frame, text="Color Range").pack()
-            self.color_range_var = tk.DoubleVar(value=self.color_range)
-            ttk.Entry(color_range_frame, textvariable=self.color_range_var, width=10).pack()
-
-            # Checkboxes - match Igor Pro Interpo/Perim checkboxes
-            checkbox_frame = ttk.Frame(right_frame)
-            checkbox_frame.pack(fill=tk.X, padx=10, pady=5)
-
-            self.interp_var = tk.BooleanVar(value=self.interpolate)
-            ttk.Checkbutton(checkbox_frame, text="Interpolate:",
-                            variable=self.interp_var, command=self.update_display).pack(anchor=tk.W)
-
-            self.perim_var = tk.BooleanVar(value=self.show_perimeter)
-            ttk.Checkbutton(checkbox_frame, text="Perimeter:",
-                            variable=self.perim_var, command=self.update_display).pack(anchor=tk.W)
-
-            # Range controls - match Igor Pro XRange/YRange SetVariables
+            # Color range - matches Igor Pro ColorRange SetVariable
             range_frame = ttk.Frame(right_frame)
-            range_frame.pack(fill=tk.X, padx=10, pady=5)
+            range_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
 
-            ttk.Label(range_frame, text="X-Range:").pack()
-            self.x_range_var = tk.DoubleVar(value=self.x_range)
-            ttk.Entry(range_frame, textvariable=self.x_range_var, width=10).pack()
+            ttk.Label(range_frame, text="Color Range:").pack()
+            self.range_var = tk.DoubleVar(value=-1)
+            range_entry = ttk.Entry(range_frame, textvariable=self.range_var, width=15)
+            range_entry.pack()
+            range_entry.bind('<Return>', self.on_range_change)
 
-            ttk.Label(range_frame, text="Y-Range:").pack()
-            self.y_range_var = tk.DoubleVar(value=self.y_range)
-            ttk.Entry(range_frame, textvariable=self.y_range_var, width=10).pack()
+            # Checkboxes - match Igor Pro Interpo/Perim Checkbox
+            self.interp_var = tk.BooleanVar(value=False)
+            interp_check = ttk.Checkbutton(right_frame, text="Interpolate:",
+                                           variable=self.interp_var,
+                                           command=self.update_display)
+            interp_check.pack(anchor=tk.W, padx=10, pady=2)
 
-            # Measurements display - matches Igor Pro Height/Volume displays
-            measurements_frame = ttk.Frame(right_frame)
-            measurements_frame.pack(fill=tk.X, padx=10, pady=10)
+            self.perim_var = tk.BooleanVar(value=True)
+            perim_check = ttk.Checkbutton(right_frame, text="Perimeter:",
+                                          variable=self.perim_var,
+                                          command=self.update_display)
+            perim_check.pack(anchor=tk.W, padx=10, pady=2)
 
-            ttk.Label(measurements_frame, text="Height (nm)",
-                      font=('TkDefaultFont', 15)).pack()
-            self.height_label = ttk.Label(measurements_frame, text="0",
-                                          font=('TkDefaultFont', 15),
-                                          relief=tk.SUNKEN, width=15)
-            self.height_label.pack(pady=2)
+            # X/Y Range controls - match Igor Pro XRange/YRange SetVariable
+            xy_frame = ttk.Frame(right_frame)
+            xy_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
 
-            ttk.Label(measurements_frame, text="Volume (m^3 e-25)",
-                      font=('TkDefaultFont', 15)).pack(pady=(20, 0))
-            self.volume_label = ttk.Label(measurements_frame, text="0",
-                                          font=('TkDefaultFont', 15),
-                                          relief=tk.SUNKEN, width=15)
-            self.volume_label.pack(pady=2)
+            ttk.Label(xy_frame, text="X-Range:").pack()
+            self.x_range_var = tk.DoubleVar(value=-1)
+            x_range_entry = ttk.Entry(xy_frame, textvariable=self.x_range_var, width=15)
+            x_range_entry.pack()
 
-            # Delete button - matches Igor Pro DELETE button
-            delete_button = ttk.Button(right_frame, text="DELETE",
-                                       command=self.delete_particle,
-                                       style="Delete.TButton")
-            delete_button.pack(pady=20, padx=10, fill=tk.X)
+            ttk.Label(xy_frame, text="Y-Range:").pack()
+            self.y_range_var = tk.DoubleVar(value=-1)
+            y_range_entry = ttk.Entry(xy_frame, textvariable=self.y_range_var, width=15)
+            y_range_entry.pack()
 
-            # Configure delete button style to be red
-            style = ttk.Style()
-            style.configure("Delete.TButton", foreground="red", font=('TkDefaultFont', 14, 'bold'))
+            # Height display - matches Igor Pro HeightTitle/HeightDisp
+            height_frame = ttk.Frame(right_frame)
+            height_frame.pack(fill=tk.X, padx=10, pady=(15, 5))
+
+            ttk.Label(height_frame, text="Height", font=('TkDefaultFont', 15)).pack()
+            self.height_display = ttk.Label(height_frame, text="0",
+                                            font=('TkDefaultFont', 15),
+                                            relief=tk.SUNKEN, background='white')
+            self.height_display.pack(fill=tk.X)
+
+            # Volume display - matches Igor Pro VolTitle/VolDisp
+            vol_frame = ttk.Frame(right_frame)
+            vol_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
+
+            ttk.Label(vol_frame, text="Volume", font=('TkDefaultFont', 15)).pack()
+            self.vol_display = ttk.Label(vol_frame, text="0",
+                                         font=('TkDefaultFont', 15),
+                                         relief=tk.SUNKEN, background='white')
+            self.vol_display.pack(fill=tk.X)
+
+            # Delete button - matches Igor Pro DeleteBtn
+            self.delete_btn = ttk.Button(right_frame, text="DELETE",
+                                         command=self.delete_particle)
+            self.delete_btn.pack(side=tk.BOTTOM, pady=10, padx=10, fill=tk.X)
 
             # Keyboard bindings - matches Igor Pro keyboard shortcuts
             self.root.bind('<Left>', lambda e: self.prev_particle())
@@ -280,89 +291,80 @@ def ViewParticles(im, info, mapNum=None):
             self.root.focus_set()
 
         def update_display(self):
-            """Update the particle display"""
+            """Update particle display - matches Igor Pro display exactly"""
             if self.current_particle >= self.total_particles:
                 return
 
             self.ax.clear()
 
             # Get current particle info
-            particle_info = self.info.data[self.current_particle]
-            x_center = particle_info[0]
-            y_center = particle_info[1]
-            radius = particle_info[2]
+            x_coord = self.info.data[self.current_particle, 0]
+            y_coord = self.info.data[self.current_particle, 1]
+            radius = self.info.data[self.current_particle, 2]
 
-            # Create particle crop - matches Igor Pro particle cropping
-            crop_size = radius * 2.5  # Reasonable crop size
+            # Create zoomed view around particle
+            zoom_factor = 3.0
+            crop_size = radius * zoom_factor
 
-            x_min = x_center - crop_size
-            x_max = x_center + crop_size
-            y_min = y_center - crop_size
-            y_max = y_center + crop_size
+            # Calculate crop region
+            x_min = x_coord - crop_size
+            x_max = x_coord + crop_size
+            y_min = y_coord - crop_size
+            y_max = y_coord + crop_size
 
-            # Find corresponding image indices
-            x_idx_min = int((x_min - DimOffset(self.im, 1)) / DimDelta(self.im, 1))
-            x_idx_max = int((x_max - DimOffset(self.im, 1)) / DimDelta(self.im, 1))
-            y_idx_min = int((y_min - DimOffset(self.im, 0)) / DimDelta(self.im, 0))
-            y_idx_max = int((y_max - DimOffset(self.im, 0)) / DimDelta(self.im, 0))
+            # Convert to pixel coordinates for cropping
+            dx = DimDelta(self.im, 1)
+            dy = DimDelta(self.im, 0)
+            x_offset = DimOffset(self.im, 1)
+            y_offset = DimOffset(self.im, 0)
 
-            # Clamp to image bounds
-            x_idx_min = max(0, x_idx_min)
-            x_idx_max = min(self.im.data.shape[1], x_idx_max)
-            y_idx_min = max(0, y_idx_min)
-            y_idx_max = min(self.im.data.shape[0], y_idx_max)
+            x_min_px = max(0, int((x_min - x_offset) / dx))
+            x_max_px = min(self.im.data.shape[1], int((x_max - x_offset) / dx))
+            y_min_px = max(0, int((y_min - y_offset) / dy))
+            y_max_px = min(self.im.data.shape[0], int((y_max - y_offset) / dy))
 
-            # Extract crop
-            crop_data = self.im.data[y_idx_min:y_idx_max, x_idx_min:x_idx_max]
+            # Extract cropped data
+            crop_data = self.im.data[y_min_px:y_max_px, x_min_px:x_max_px]
 
-            # Convert back to physical coordinates
-            crop_x_min = DimOffset(self.im, 1) + x_idx_min * DimDelta(self.im, 1)
-            crop_x_max = DimOffset(self.im, 1) + x_idx_max * DimDelta(self.im, 1)
-            crop_y_min = DimOffset(self.im, 0) + y_idx_min * DimDelta(self.im, 0)
-            crop_y_max = DimOffset(self.im, 0) + y_idx_max * DimDelta(self.im, 0)
+            # Calculate actual display coordinates
+            actual_x_min = x_offset + x_min_px * dx
+            actual_x_max = x_offset + x_max_px * dx
+            actual_y_min = y_offset + y_min_px * dy
+            actual_y_max = y_offset + y_max_px * dy
 
-            # Display image crop
+            # Display image
             interpolation = 'bilinear' if self.interp_var.get() else 'nearest'
-            colormap = self.color_var.get().lower()
-            if colormap == 'grays':
-                colormap = 'gray'
-            elif colormap == 'rainbow':
-                colormap = 'rainbow'
-            elif colormap == 'blueredgreen':
-                colormap = 'RdYlBu'
-            elif colormap == 'terrain':
-                colormap = 'terrain'
+            cmap = self.color_var.get().lower()
+            if cmap == 'grays':
+                cmap = 'gray'
 
-            im_display = self.ax.imshow(crop_data,
-                                        extent=[crop_x_min, crop_x_max, crop_y_max, crop_y_min],
-                                        cmap=colormap, aspect='equal', origin='upper',
-                                        interpolation=interpolation)
+            self.ax.imshow(crop_data,
+                           extent=[actual_x_min, actual_x_max, actual_y_max, actual_y_min],
+                           cmap=cmap, aspect='equal', origin='upper',
+                           interpolation=interpolation)
 
-            # Show perimeter if enabled - matches Igor Pro green circle overlay
+            # Add perimeter if enabled
             if self.perim_var.get():
-                circle = Circle((x_center, y_center), radius,
-                                fill=False, edgecolor='lime', linewidth=2)
+                circle = Circle((x_coord, y_coord), radius,
+                                fill=False, edgecolor='red', linewidth=2)
                 self.ax.add_patch(circle)
 
-            # Set axis labels and title
+            # Set labels and title
             self.ax.set_xlabel(f"X ({DimUnits(self.im, 1)})")
             self.ax.set_ylabel(f"Y ({DimUnits(self.im, 0)})")
+            self.ax.set_title(f"Particle {self.current_particle + 1}")
 
             # Update particle label
             self.particle_label.config(text=f"Particle {self.current_particle + 1}")
             self.goto_var.set(self.current_particle)
 
-            # Update measurements - matches Igor Pro format
-            height = particle_info[10] if len(particle_info) > 10 else 0
-            volume = particle_info[9] if len(particle_info) > 9 else 0
+            # Update measurements if available
+            if self.info.data.shape[1] > 10:
+                height_val = self.info.data[self.current_particle, 10]
+                volume_val = self.info.data[self.current_particle, 9]
 
-            # Convert height to nm (assuming meters)
-            height_nm = height * 1e9
-            self.height_label.config(text=f"{height_nm:.4f}")
-
-            # Convert volume to m^3 e-25
-            volume_e25 = volume * 1e25
-            self.volume_label.config(text=f"{volume_e25:.2f}")
+                self.height_display.config(text=f"{height_val:.4f}")
+                self.vol_display.config(text=f"{volume_val:.2e}")
 
             self.figure.tight_layout()
             self.canvas.draw()
@@ -380,38 +382,41 @@ def ViewParticles(im, info, mapNum=None):
                 self.update_display()
 
         def goto_particle(self, event=None):
-            """Go to specific particle number"""
+            """Go to specific particle"""
             try:
-                particle_num = self.goto_var.get()
-                if 0 <= particle_num < self.total_particles:
-                    self.current_particle = particle_num
+                target = self.goto_var.get()
+                if 0 <= target < self.total_particles:
+                    self.current_particle = target
                     self.update_display()
             except tk.TclError:
                 pass
 
-        def change_color_table(self, event=None):
-            """Change color table"""
-            self.color_table = self.color_var.get()
+        def on_color_change(self, event=None):
+            """Handle color table change"""
+            self.update_display()
+
+        def on_range_change(self, event=None):
+            """Handle color range change"""
             self.update_display()
 
         def delete_particle(self):
-            """Delete current particle - matches Igor Pro DELETE functionality"""
+            """Delete current particle"""
             if messagebox.askyesno("Delete Particle",
                                    f"Delete particle {self.current_particle + 1}?"):
-                # Remove particle from info array
-                if self.total_particles > 1:
-                    mask = np.ones(self.total_particles, dtype=bool)
-                    mask[self.current_particle] = False
-                    self.info.data = self.info.data[mask]
-                    self.total_particles -= 1
+                # Remove from info array
+                self.info.data = np.delete(self.info.data, self.current_particle, axis=0)
+                self.total_particles -= 1
 
-                    # Adjust current particle index
-                    if self.current_particle >= self.total_particles:
-                        self.current_particle = self.total_particles - 1
+                if self.total_particles == 0:
+                    messagebox.showinfo("No Particles", "All particles deleted.")
+                    self.root.destroy()
+                    return
 
-                    self.update_display()
-                else:
-                    messagebox.showinfo("Cannot Delete", "Cannot delete the last particle.")
+                # Adjust current particle if needed
+                if self.current_particle >= self.total_particles:
+                    self.current_particle = self.total_particles - 1
+
+                self.update_display()
 
     # Create and show the viewer
     viewer = ParticleViewer(im, info)

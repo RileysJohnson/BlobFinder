@@ -2,7 +2,7 @@
 """
 Hessian Blob Particle Detection Suite - Main GUI
 Complete 1-1 port from Igor Pro implementation
-FIXED: Simplified layout with working blob toggle and image selection
+FIXED: Blob overlay display working properly
 
 Copyright 2019 by The Curators of the University of Missouri (original Igor Pro code)
 Python port maintains 1-1 functionality with Igor Pro version
@@ -358,6 +358,7 @@ class HessianBlobGUI:
                 return
 
             # Draw red circles for each detected blob
+            blob_count = 0
             for i in range(info_wave.data.shape[0]):
                 x_coord = info_wave.data[i, 0]
                 y_coord = info_wave.data[i, 1]
@@ -365,10 +366,11 @@ class HessianBlobGUI:
 
                 # Create red circle overlay (matches Igor Pro)
                 circle = Circle((x_coord, y_coord), radius,
-                                fill=False, edgecolor='red', linewidth=2)
+                                fill=False, edgecolor='red', linewidth=2, alpha=0.8)
                 self.ax.add_patch(circle)
+                blob_count += 1
 
-            self.log_message(f"Showing {info_wave.data.shape[0]} detected blobs")
+            self.log_message(f"Displaying {blob_count} detected blobs")
 
         except Exception as e:
             self.log_message(f"Error adding blob overlay: {str(e)}")
@@ -376,6 +378,7 @@ class HessianBlobGUI:
     def toggle_blob_display(self):
         """Toggle blob overlay display - FIXED"""
         self.show_blobs = self.blob_toggle_var.get()
+        self.log_message(f"Blob display: {'ON' if self.show_blobs else 'OFF'}")
         if self.current_display_image is not None:
             self.display_image()
 
