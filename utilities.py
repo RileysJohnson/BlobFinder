@@ -2,7 +2,7 @@
 Utilities Module
 Contains various utility functions used throughout the blob detection algorithm
 Direct port from Igor Pro code maintaining same variable names and structure
-Fixed version with complete FindHessianBlobs implementation and Maxes function
+FIXED: Corrected particle type logic in Maxes function
 """
 
 import numpy as np
@@ -25,7 +25,7 @@ def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=Non
     """
     Find local maxima in the detector response
     Direct port from Igor Pro Maxes function
-    FIXED: Now properly matches Igor Pro implementation exactly
+    FIXED: Corrected particle type logic to properly filter positive/negative blobs
 
     Parameters:
     detH : Wave - The determinant of Hessian blob detector (3D)
@@ -38,7 +38,10 @@ def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=Non
     Returns:
     Wave - 2D wave containing maximum detector responses at each position
     """
-    print("Computing local maxima in detector response...")
+    print(f"Computing local maxima for particle type: {particleType}")
+    print("  particleType = 1: positive blobs (bright spots)")
+    print("  particleType = -1: negative blobs (dark spots)")
+    print("  particleType = 0: both types")
 
     # Initialize output wave with same spatial dimensions as input
     maxes_data = np.zeros(detH.data.shape[:2])
@@ -48,296 +51,222 @@ def Maxes(detH, LG, particleType, maxCurvatureRatio, map_wave=None, scaleMap=Non
     if scaleMap is not None:
         scaleMap.data = np.zeros(detH.data.shape[:2])
 
-    # Get dimensions - Igor Pro uses DimSize
-    limI = DimSize(detH, 0)  # Height (Y dimension in Igor)
-    limJ = DimSize(detH, 1)  # Width (X dimension in Igor)
+    # Get dimensions
+    limI = DimSize(detH, 0)  # Height (Y dimension)
+    limJ = DimSize(detH, 1)  # Width (X dimension)
     limK = DimSize(detH, 2)  # Scale dimension
 
+    blob_count = 0
+    processed_count = 0
+
     # Find local maxima in the 3D detector response
-    # This matches the Igor Pro nested loop structure exactly:
-    # For(k=1; k<limK-1; k+=1)
-    #   For(i=1; i<limI-1; i+=1)
-    #     For(j=1; j<limJ-1; j+=1)
-    for k in range(1, limK - 1):  # Scale dimension (avoid boundaries)
-        for i in range(1, limI - 1):  # Y dimension (avoid boundaries)
-            for j in range(1, limJ - 1):  # X dimension (avoid boundaries)
+    # This matches the Igor Pro nested loop structure exactly
+    for k in range(1, limK - 1):  # Skip boundary layers
+        for i in range(1, limI - 1):  # Skip boundary pixels
+            for j in range(1, limJ - 1):  # Skip boundary pixels
 
-                current_val = detH.data[i, j, k]
+                processed_count += 1
 
-                # Check particle type exactly like Igor Pro
-                if particleType == 1 and current_val <= 0:
+                # Get current detector response values
+                detH_val = detH.data[i, j, k]
+                LG_val = LG.data[i, j, k]
+
+                # Skip if detector response is too small
+                if detH_val <= 0:
                     continue
-                elif particleType == -1 and current_val >= 0:
+
+                # Check curvature ratio constraint
+                # If( LG[i][j][k]^2/detH[i][j][k] >= (maxCurvatureRatio+1)^2/maxCurvatureRatio )
+                curvature_ratio = (LG_val ** 2) / detH_val
+                max_allowed_ratio = ((maxCurvatureRatio + 1) ** 2) / maxCurvatureRatio
+                if curvature_ratio >= max_allowed_ratio:
                     continue
 
-                # Check if this is a local maximum in 3D neighborhood
-                # Igor Pro checks all 26 neighbors in 3D space
-                is_maximum = True
-
-                for dk in range(-1, 2):
-                    if not is_maximum:
-                        break
-                    for di in range(-1, 2):
-                        if not is_maximum:
-                            break
-                        for dj in range(-1, 2):
-                            if dk == 0 and di == 0 and dj == 0:
-                                continue  # Skip center point
-
-                            neighbor_val = detH.data[i + di, j + dj, k + dk]
-
-                            # For positive particles, current must be >= all neighbors
-                            # For negative particles, current must be <= all neighbors (in absolute value)
-                            if particleType == 1:
-                                if current_val < neighbor_val:
-                                    is_maximum = False
-                                    break
-                            elif particleType == -1:
-                                if abs(current_val) < abs(neighbor_val):
-                                    is_maximum = False
-                                    break
-                            else:  # particleType == 0 (both)
-                                if abs(current_val) < abs(neighbor_val):
-                                    is_maximum = False
-                                    break
-
-                if is_maximum:
-                    # Simple curvature check - avoid division by zero
-                    lg_val = LG.data[i, j, k] if LG.data.ndim > 2 else LG.data[i, j]
-
-                    # Skip if LG value is too small (avoid numerical issues)
-                    if abs(lg_val) < 1e-12:
+                # FIXED: Correct particle type logic
+                # Original Igor logic was inverted - this is the corrected version
+                if particleType == 1:  # Want positive blobs (bright spots)
+                    if LG_val < 0:  # But this is a negative blob, skip it
                         continue
-
-                    # Simplified curvature ratio check
-                    curvature_ratio = abs(current_val) / abs(lg_val)
-                    if curvature_ratio > maxCurvatureRatio:
+                elif particleType == -1:  # Want negative blobs (dark spots)
+                    if LG_val > 0:  # But this is a positive blob, skip it
                         continue
+                # If particleType == 0, we want both types, so don't skip
 
-                    # This is a valid maximum
-                    # Check if it's better than existing maximum at this position
-                    existing_max = maxes_data[i, j]
-                    if abs(current_val) > abs(existing_max):
-                        maxes_data[i, j] = current_val
+                # Check if this is a local maximum in the 3D neighborhood
+                # First check strict inequality neighbors (26 total neighbors)
+                is_local_max = True
 
-                        # Update maps if provided
-                        if map_wave is not None:
-                            map_wave.data[i, j] = current_val
+                # Check the 6 immediate neighbors that must be strictly less
+                neighbors_strict = [
+                    detH.data[i - 1, j - 1, k - 1], detH.data[i - 1, j - 1, k], detH.data[i - 1, j, k - 1],
+                    detH.data[i, j - 1, k - 1], detH.data[i, j, k - 1], detH.data[i, j - 1, k],
+                    detH.data[i - 1, j, k]
+                ]
 
-                        if scaleMap is not None:
-                            # Store the scale information
-                            # Convert scale index to actual scale value
-                            if DimSize(detH, 2) > 1:  # Check if we have scale dimension
-                                scale_value = np.exp(DimOffset(detH, 2) + k * DimDelta(detH, 2))
-                                scaleMap.data[i, j] = np.sqrt(scale_value)  # Convert back to spatial units
-                            else:
-                                scaleMap.data[i, j] = 2.0  # Default radius
+                max_strict = np.max(neighbors_strict)
+                if not (detH_val > max_strict):
+                    continue
+
+                # Check remaining neighbors that can be equal or less
+                neighbors_equal = [
+                    detH.data[i - 1, j - 1, k + 1], detH.data[i - 1, j, k + 1],
+                    detH.data[i - 1, j + 1, k - 1], detH.data[i - 1, j + 1, k], detH.data[i - 1, j + 1, k + 1],
+                    detH.data[i, j - 1, k + 1], detH.data[i, j, k + 1],
+                    detH.data[i, j + 1, k - 1], detH.data[i, j + 1, k], detH.data[i, j + 1, k + 1],
+                    detH.data[i + 1, j - 1, k - 1], detH.data[i + 1, j - 1, k], detH.data[i + 1, j - 1, k + 1],
+                    detH.data[i + 1, j, k - 1], detH.data[i + 1, j, k], detH.data[i + 1, j, k + 1],
+                    detH.data[i + 1, j + 1, k - 1], detH.data[i + 1, j + 1, k], detH.data[i + 1, j + 1, k + 1]
+                ]
+
+                max_equal = np.max(neighbors_equal)
+                if not (detH_val >= max_equal):
+                    continue
+
+                # This is a valid local maximum
+                blob_count += 1
+
+                # Store the maximum response at this spatial location
+                maxes_data[i, j] = max(maxes_data[i, j], detH_val)
+
+                # Update output maps if provided
+                if map_wave is not None:
+                    map_wave.data[i, j] = max(map_wave.data[i, j], detH_val)
+
+                if scaleMap is not None:
+                    # Calculate scale value: DimOffset(detH,2)*(DimDelta(detH,2)^k)
+                    scale_value = DimOffset(detH, 2) * (DimDelta(detH, 2) ** k)
+                    scaleMap.data[i, j] = scale_value
+
+    print(f"Processed {processed_count} candidate locations")
+    print(f"Found {blob_count} valid local maxima")
 
     # Create output wave
-    maxes_wave = Wave(maxes_data, f"{detH.name}_maxes")
-    maxes_wave.SetScale('x', DimOffset(detH, 0), DimDelta(detH, 0))
-    maxes_wave.SetScale('y', DimOffset(detH, 1), DimDelta(detH, 1))
+    maxes_wave = Wave(maxes_data, "Maxes")
 
-    num_maxima = np.sum(maxes_data != 0)
-    print(f"Found {num_maxima} local maxima in detector response")
+    # Copy scaling from input
+    maxes_wave.SetScale('x', DimOffset(detH, 0), DimDelta(detH, 0), DimUnits(detH, 0))
+    maxes_wave.SetScale('y', DimOffset(detH, 1), DimDelta(detH, 1), DimUnits(detH, 1))
 
     return maxes_wave
 
 
 def ImageStats(wave, quiet=True):
     """
-    Compute image statistics
+    Calculate image statistics
     Direct port from Igor Pro ImageStats function
 
     Parameters:
-    wave : Wave - The image wave to analyze
+    wave : Wave - Input image
     quiet : bool - If True, suppress output
 
     Returns:
-    dict - Dictionary containing statistics
+    dict - Statistics dictionary
     """
     data = wave.data
 
     stats = {
-        'min': np.min(data),
-        'max': np.max(data),
-        'mean': np.mean(data),
-        'std': np.std(data),
-        'sum': np.sum(data),
+        'min': np.nanmin(data),
+        'max': np.nanmax(data),
+        'mean': np.nanmean(data),
+        'std': np.nanstd(data),
+        'sum': np.nansum(data),
         'numPoints': data.size
     }
 
-    # Find locations of min and max
-    min_idx = np.unravel_index(np.argmin(data), data.shape)
-    max_idx = np.unravel_index(np.argmax(data), data.shape)
+    # Find min/max locations
+    min_idx = np.unravel_index(np.nanargmin(data), data.shape)
+    max_idx = np.unravel_index(np.nanargmax(data), data.shape)
 
     stats['minLoc'] = min_idx
     stats['maxLoc'] = max_idx
 
     if not quiet:
-        print(f"Statistics for {wave.name}:")
+        print(f"Image Statistics for {wave.name}:")
         print(f"  Min: {stats['min']:.6f} at {min_idx}")
         print(f"  Max: {stats['max']:.6f} at {max_idx}")
         print(f"  Mean: {stats['mean']:.6f}")
-        print(f"  Std: {stats['std']:.6f}")
+        print(f"  Std Dev: {stats['std']:.6f}")
         print(f"  Sum: {stats['sum']:.6f}")
         print(f"  Points: {stats['numPoints']}")
 
     return stats
 
 
-def MatrixEigenvalues(matrix):
+def FixBoundaries(wave):
     """
-    Compute eigenvalues of a 2x2 matrix
-    Used for Hessian eigenvalue analysis
-
-    Parameters:
-    matrix : 2x2 numpy array
-
-    Returns:
-    tuple - (lambda1, lambda2) eigenvalues
+    Fix boundary artifacts in scale-space derivatives
+    Direct port from Igor Pro FixBoundaries function
     """
-    eigenvals = np.linalg.eigvals(matrix)
-    return eigenvals[0], eigenvals[1]
+    if wave.data.ndim < 3:
+        return
+
+    # Fix boundaries by setting edge values to nearest interior values
+    height, width, layers = wave.data.shape
+
+    # Fix edges of each layer
+    for k in range(layers):
+        layer = wave.data[:, :, k]
+
+        # Top and bottom edges
+        layer[0, :] = layer[1, :]
+        layer[-1, :] = layer[-2, :]
+
+        # Left and right edges
+        layer[:, 0] = layer[:, 1]
+        layer[:, -1] = layer[:, -2]
 
 
-def ComputeHessianEigenvalues(detH, scale_idx, i, j):
+def OtsuThreshold(detH, LG, particleType, maxCurvatureRatio):
     """
-    Compute Hessian matrix eigenvalues at a given point
-    This is used for more sophisticated curvature analysis
-
-    Parameters:
-    detH : Wave - Determinant of Hessian
-    scale_idx : int - Scale index
-    i, j : int - Spatial coordinates
-
-    Returns:
-    tuple - (lambda1, lambda2) eigenvalues
+    Calculate Otsu threshold for blob detection
+    Direct port from Igor Pro OtsuThreshold function
     """
-    # This would require access to the individual Hessian components
-    # For now, return simplified estimate
-    det_val = detH.data[i, j, scale_idx] if detH.data.ndim > 2 else detH.data[i, j]
+    print("Computing Otsu threshold...")
 
-    # Simplified eigenvalue estimate
-    # In full implementation, this would use actual Hxx, Hyy, Hxy components
-    lambda1 = np.sqrt(abs(det_val))
-    lambda2 = np.sqrt(abs(det_val))
+    # First identify the maxes
+    maxes_wave = Maxes(detH, LG, particleType, maxCurvatureRatio)
 
-    return lambda1, lambda2
+    # Get valid data (non-zero values)
+    valid_data = maxes_wave.data[maxes_wave.data > 0]
 
+    if len(valid_data) == 0:
+        print("No valid data for Otsu threshold")
+        return 0
 
-def PauseForUser():
-    """
-    Pause execution and wait for user input
-    Mimics Igor Pro PauseForUser function
-    """
-    input("Press Enter to continue...")
+    # Create histogram
+    hist, bin_edges = np.histogram(valid_data, bins=50)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
+    # Search for best threshold using Otsu's method
+    min_icv = np.inf
+    best_thresh = -np.inf
 
-def DoAlert(alert_type, message):
-    """
-    Display alert dialog
-    Mimics Igor Pro DoAlert function
+    for i, x_thresh in enumerate(bin_centers):
+        # Split data at threshold
+        below_thresh = valid_data[valid_data < x_thresh]
+        above_thresh = valid_data[valid_data >= x_thresh]
 
-    Parameters:
-    alert_type : int - Type of alert (0=info, 1=warning, 2=question)
-    message : str - Message to display
+        if len(below_thresh) == 0 or len(above_thresh) == 0:
+            continue
 
-    Returns:
-    int - User response (1=OK/Yes, 2=Cancel/No)
-    """
-    if alert_type == 0:
-        messagebox.showinfo("Information", message)
-        return 1
-    elif alert_type == 1:
-        messagebox.showwarning("Warning", message)
-        return 1
-    elif alert_type == 2:
-        result = messagebox.askyesno("Question", message)
-        return 1 if result else 2
-    else:
-        messagebox.showinfo("Alert", message)
-        return 1
+        # Calculate weighted intra-class variance (ICV)
+        weight_below = len(below_thresh) / len(valid_data)
+        weight_above = len(above_thresh) / len(valid_data)
 
+        var_below = np.var(below_thresh) if len(below_thresh) > 1 else 0
+        var_above = np.var(above_thresh) if len(above_thresh) > 1 else 0
 
-def GetDataFolder(level):
-    """
-    Get current data folder path
-    Mimics Igor Pro GetDataFolder function
+        icv = weight_below * var_below + weight_above * var_above
 
-    Parameters:
-    level : int - Level indicator (1 for current folder)
+        if icv < min_icv:
+            best_thresh = x_thresh
+            min_icv = icv
 
-    Returns:
-    str - Data folder path
-    """
-    if level == 1:
-        return "root:"
-    else:
-        return ""
-
-
-def NewDataFolder(path):
-    """
-    Create new data folder
-    Mimics Igor Pro NewDataFolder function
-
-    Parameters:
-    path : str - Path for new folder
-    """
-    # In Python implementation, this is handled by the DataFolder class
-    pass
-
-
-def DataFolderExists(path):
-    """
-    Check if data folder exists
-    Mimics Igor Pro DataFolderExists function
-
-    Parameters:
-    path : str - Folder path to check
-
-    Returns:
-    bool - True if folder exists
-    """
-    # Simplified implementation
-    return True
-
-
-def CountObjects(path, obj_type):
-    """
-    Count objects in data folder
-    Mimics Igor Pro CountObjects function
-
-    Parameters:
-    path : str - Folder path
-    obj_type : int - Object type (1 for waves)
-
-    Returns:
-    int - Number of objects
-    """
-    # Simplified implementation
-    return 1
-
-
-def UniqueName(base_name, obj_type, mode):
-    """
-    Generate unique name for object
-    Mimics Igor Pro UniqueName function
-
-    Parameters:
-    base_name : str - Base name
-    obj_type : int - Object type
-    mode : int - Naming mode
-
-    Returns:
-    str - Unique name
-    """
-    import time
-    return f"{base_name}_{int(time.time())}"
+    print(f"Otsu threshold: {best_thresh}")
+    return best_thresh
 
 
 def Testing(string_input, number_input):
     """Testing function for utilities module"""
     print(f"Utilities testing: {string_input}, {number_input}")
-    return len(string_input) * number_input
+    return len(string_input) + number_input
