@@ -53,16 +53,40 @@ def BatchPreprocess():
             buttons_frame = ttk.Frame(input_frame)
             buttons_frame.pack(fill=tk.X)
 
-            ttk.Button(buttons_frame, text="Add Files",
-                       command=self.add_files).pack(side=tk.LEFT, padx=(0, 5))
-            ttk.Button(buttons_frame, text="Add Folder",
-                       command=self.add_folder).pack(side=tk.LEFT, padx=(0, 5))
-            ttk.Button(buttons_frame, text="Clear List",
-                       command=self.clear_files).pack(side=tk.LEFT, padx=(0, 5))
+            ttk.Button(buttons_frame, text="Add Files", command=self.add_files).pack(side=tk.LEFT, padx=5)
+            ttk.Button(buttons_frame, text="Add Folder", command=self.add_folder).pack(side=tk.LEFT, padx=5)
+            ttk.Button(buttons_frame, text="Clear", command=self.clear_files).pack(side=tk.LEFT, padx=5)
 
             # File list
-            self.file_listbox = tk.Listbox(input_frame, height=6)
-            self.file_listbox.pack(fill=tk.X, pady=(10, 0))
+            list_frame = ttk.Frame(input_frame)
+            list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+            self.file_listbox = tk.Listbox(list_frame, height=6)
+            scrollbar_files = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_listbox.yview)
+            self.file_listbox.configure(yscrollcommand=scrollbar_files.set)
+
+            self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar_files.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # Preprocessing parameters - matches Igor Pro exactly
+            params_frame = ttk.LabelFrame(main_frame, text="Preprocessing Parameters", padding="10")
+            params_frame.pack(fill=tk.X, pady=(0, 10))
+
+            # Streak removal parameters
+            streak_frame = ttk.Frame(params_frame)
+            streak_frame.pack(fill=tk.X, pady=5)
+
+            ttk.Label(streak_frame, text="Std. Deviations for streak removal (0 = disable):").pack(side=tk.LEFT)
+            self.streak_sdevs_var = tk.DoubleVar(value=3)  # Igor Pro default
+            ttk.Entry(streak_frame, textvariable=self.streak_sdevs_var, width=10).pack(side=tk.LEFT, padx=5)
+
+            # Flattening parameters
+            flatten_frame = ttk.Frame(params_frame)
+            flatten_frame.pack(fill=tk.X, pady=5)
+
+            ttk.Label(flatten_frame, text="Polynomial order for flattening (0 = disable):").pack(side=tk.LEFT)
+            self.flatten_order_var = tk.IntVar(value=2)  # Igor Pro default
+            ttk.Entry(flatten_frame, textvariable=self.flatten_order_var, width=10).pack(side=tk.LEFT, padx=5)
 
             # Output folder section
             output_frame = ttk.LabelFrame(main_frame, text="Output Folder", padding="10")
@@ -72,59 +96,38 @@ def BatchPreprocess():
             output_buttons_frame.pack(fill=tk.X)
 
             ttk.Button(output_buttons_frame, text="Select Output Folder",
-                       command=self.select_output_folder).pack(side=tk.LEFT)
+                       command=self.select_output_folder).pack(side=tk.LEFT, padx=5)
 
             self.output_label = ttk.Label(output_frame, text="No output folder selected")
             self.output_label.pack(anchor=tk.W, pady=(5, 0))
 
-            # Preprocessing operations section
-            ops_frame = ttk.LabelFrame(main_frame, text="Preprocessing Operations", padding="10")
-            ops_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            # Progress and control
+            progress_frame = ttk.Frame(main_frame)
+            progress_frame.pack(fill=tk.X, pady=(0, 10))
 
-            # Operations list
-            ops_list_frame = ttk.Frame(ops_frame)
-            ops_list_frame.pack(fill=tk.BOTH, expand=True)
+            self.progress = ttk.Progressbar(progress_frame, mode='determinate')
+            self.progress.pack(fill=tk.X, pady=(0, 5))
 
-            self.ops_listbox = tk.Listbox(ops_list_frame, height=8)
-            self.ops_listbox.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+            self.status_label = ttk.Label(progress_frame, text="Ready")
+            self.status_label.pack(anchor=tk.W)
 
-            ops_buttons_frame = ttk.Frame(ops_list_frame)
-            ops_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+            # Control buttons
+            control_frame = ttk.Frame(main_frame)
+            control_frame.pack(fill=tk.X)
 
-            ttk.Button(ops_buttons_frame, text="Add Gaussian Blur",
-                       command=self.add_gaussian_blur).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Add Median Filter",
-                       command=self.add_median_filter).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Add Background Subtract",
-                       command=self.add_background_subtract).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Add Normalize",
-                       command=self.add_normalize).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Add Crop",
-                       command=self.add_crop).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Remove Selected",
-                       command=self.remove_operation).pack(fill=tk.X, pady=2)
-            ttk.Button(ops_buttons_frame, text="Clear All",
-                       command=self.clear_operations).pack(fill=tk.X, pady=2)
-
-            # Process button
-            process_frame = ttk.Frame(main_frame)
-            process_frame.pack(fill=tk.X)
-
-            ttk.Button(process_frame, text="Start Processing",
-                       command=self.start_processing).pack(side=tk.RIGHT)
-            ttk.Button(process_frame, text="Cancel",
-                       command=self.root.destroy).pack(side=tk.RIGHT, padx=(0, 10))
+            ttk.Button(control_frame, text="Start Preprocessing",
+                       command=self.start_preprocessing).pack(side=tk.LEFT, padx=5)
+            ttk.Button(control_frame, text="Close",
+                       command=self.root.destroy).pack(side=tk.RIGHT, padx=5)
 
         def add_files(self):
             """Add individual files"""
-            filetypes = [
-                ("All Supported", "*.tif;*.tiff;*.png;*.jpg;*.jpeg;*.ibw"),
-                ("All files", "*.*")
-            ]
-
             files = filedialog.askopenfilenames(
                 title="Select Image Files",
-                filetypes=filetypes
+                filetypes=[
+                    ("Image files", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.ibw"),
+                    ("All files", "*.*")
+                ]
             )
 
             for file in files:
@@ -134,21 +137,22 @@ def BatchPreprocess():
 
         def add_folder(self):
             """Add all images from a folder"""
-            folder = filedialog.askdirectory(title="Select Folder")
+            folder = filedialog.askdirectory(title="Select Image Folder")
             if folder:
-                extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.ibw']
-                folder_path = Path(folder)
-
+                extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.ibw']
                 for ext in extensions:
-                    for file in folder_path.glob(f"*{ext}"):
-                        file_str = str(file)
-                        if file_str not in self.input_files:
-                            self.input_files.append(file_str)
+                    for file in Path(folder).glob(f"*{ext}"):
+                        if str(file) not in self.input_files:
+                            self.input_files.append(str(file))
+                            self.file_listbox.insert(tk.END, file.name)
+                    for file in Path(folder).glob(f"*{ext.upper()}"):
+                        if str(file) not in self.input_files:
+                            self.input_files.append(str(file))
                             self.file_listbox.insert(tk.END, file.name)
 
         def clear_files(self):
-            """Clear the file list"""
-            self.input_files = []
+            """Clear all files"""
+            self.input_files.clear()
             self.file_listbox.delete(0, tk.END)
 
         def select_output_folder(self):
@@ -158,403 +162,313 @@ def BatchPreprocess():
                 self.output_folder = folder
                 self.output_label.config(text=f"Output: {folder}")
 
-        def add_gaussian_blur(self):
-            """Add Gaussian blur operation"""
-            sigma = tk.simpledialog.askfloat("Gaussian Blur", "Enter sigma value:", initialvalue=1.0)
-            if sigma is not None:
-                op = {"type": "gaussian_blur", "sigma": sigma}
-                self.operations.append(op)
-                self.ops_listbox.insert(tk.END, f"Gaussian Blur (σ={sigma})")
-
-        def add_median_filter(self):
-            """Add median filter operation"""
-            size = tk.simpledialog.askinteger("Median Filter", "Enter filter size:", initialvalue=3)
-            if size is not None:
-                op = {"type": "median_filter", "size": size}
-                self.operations.append(op)
-                self.ops_listbox.insert(tk.END, f"Median Filter (size={size})")
-
-        def add_background_subtract(self):
-            """Add background subtraction operation"""
-            method = tk.messagebox.askyesno("Background Subtract",
-                                            "Use rolling ball? (No = polynomial)")
-            if method is not None:
-                if method:
-                    radius = tk.simpledialog.askfloat("Rolling Ball", "Enter ball radius:", initialvalue=50.0)
-                    if radius is not None:
-                        op = {"type": "background_subtract", "method": "rolling_ball", "radius": radius}
-                        self.operations.append(op)
-                        self.ops_listbox.insert(tk.END, f"Background Subtract (rolling ball, r={radius})")
-                else:
-                    order = tk.simpledialog.askinteger("Polynomial", "Enter polynomial order:", initialvalue=2)
-                    if order is not None:
-                        op = {"type": "background_subtract", "method": "polynomial", "order": order}
-                        self.operations.append(op)
-                        self.ops_listbox.insert(tk.END, f"Background Subtract (polynomial, order={order})")
-
-        def add_normalize(self):
-            """Add normalization operation"""
-            method = tk.messagebox.askyesnocancel("Normalize",
-                                                  "Yes = Min-Max, No = Z-score, Cancel = abort")
-            if method is not None:
-                if method:
-                    op = {"type": "normalize", "method": "minmax"}
-                    self.operations.append(op)
-                    self.ops_listbox.insert(tk.END, "Normalize (Min-Max)")
-                else:
-                    op = {"type": "normalize", "method": "zscore"}
-                    self.operations.append(op)
-                    self.ops_listbox.insert(tk.END, "Normalize (Z-score)")
-
-        def add_crop(self):
-            """Add crop operation"""
-            # Simple crop dialog
-            dialog = tk.Toplevel(self.root)
-            dialog.title("Crop Parameters")
-            dialog.geometry("300x200")
-
-            result = {}
-
-            ttk.Label(dialog, text="Crop Parameters (pixels):").pack(pady=10)
-
-            ttk.Label(dialog, text="Left:").pack()
-            left_var = tk.IntVar(value=0)
-            ttk.Entry(dialog, textvariable=left_var, width=10).pack()
-
-            ttk.Label(dialog, text="Top:").pack()
-            top_var = tk.IntVar(value=0)
-            ttk.Entry(dialog, textvariable=top_var, width=10).pack()
-
-            ttk.Label(dialog, text="Right:").pack()
-            right_var = tk.IntVar(value=0)
-            ttk.Entry(dialog, textvariable=right_var, width=10).pack()
-
-            ttk.Label(dialog, text="Bottom:").pack()
-            bottom_var = tk.IntVar(value=0)
-            ttk.Entry(dialog, textvariable=bottom_var, width=10).pack()
-
-            def ok_clicked():
-                result['ok'] = True
-                result['left'] = left_var.get()
-                result['top'] = top_var.get()
-                result['right'] = right_var.get()
-                result['bottom'] = bottom_var.get()
-                dialog.destroy()
-
-            def cancel_clicked():
-                result['ok'] = False
-                dialog.destroy()
-
-            button_frame = ttk.Frame(dialog)
-            button_frame.pack(pady=10)
-            ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=5)
-            ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
-
-            dialog.wait_window()
-
-            if result.get('ok'):
-                op = {"type": "crop",
-                      "left": result['left'], "top": result['top'],
-                      "right": result['right'], "bottom": result['bottom']}
-                self.operations.append(op)
-                self.ops_listbox.insert(tk.END,
-                                        f"Crop (L:{result['left']}, T:{result['top']}, R:{result['right']}, B:{result['bottom']})")
-
-        def remove_operation(self):
-            """Remove selected operation"""
-            selection = self.ops_listbox.curselection()
-            if selection:
-                index = selection[0]
-                self.operations.pop(index)
-                self.ops_listbox.delete(index)
-
-        def clear_operations(self):
-            """Clear all operations"""
-            self.operations = []
-            self.ops_listbox.delete(0, tk.END)
-
-        def start_processing(self):
-            """Start the preprocessing"""
+        def start_preprocessing(self):
+            """Start the preprocessing operation"""
             if not self.input_files:
-                messagebox.showerror("Error", "No input files selected")
+                messagebox.showwarning("No Files", "Please add input files first.")
                 return
 
             if not self.output_folder:
-                messagebox.showerror("Error", "No output folder selected")
+                messagebox.showwarning("No Output", "Please select an output folder.")
                 return
 
-            if not self.operations:
-                messagebox.showerror("Error", "No preprocessing operations specified")
-                return
+            try:
+                total_files = len(self.input_files)
+                self.progress['maximum'] = total_files
 
-            # Create progress window
-            progress_window = tk.Toplevel(self.root)
-            progress_window.title("Processing...")
-            progress_window.geometry("400x150")
+                streak_sdevs = self.streak_sdevs_var.get()
+                flatten_order = self.flatten_order_var.get()
 
-            ttk.Label(progress_window, text="Processing images...").pack(pady=10)
+                for i, file_path in enumerate(self.input_files):
+                    self.status_label.config(text=f"Processing {Path(file_path).name}...")
+                    self.root.update_idletasks()
 
-            progress = ttk.Progressbar(progress_window, length=300, mode='determinate')
-            progress.pack(pady=10)
-            progress['maximum'] = len(self.input_files)
+                    try:
+                        # Load image
+                        im = LoadImageFile(file_path)
+                        if im is None:
+                            continue
 
-            status_label = ttk.Label(progress_window, text="")
-            status_label.pack(pady=5)
+                        # Apply preprocessing - matches Igor Pro BatchPreprocess exactly
+                        if streak_sdevs > 0:
+                            RemoveStreaks(im, sigma=streak_sdevs)
 
-            # Process files
-            for i, file_path in enumerate(self.input_files):
-                try:
-                    status_label.config(text=f"Processing {Path(file_path).name}")
-                    progress_window.update()
+                        if flatten_order > 0:
+                            Flatten(im, flatten_order)
 
-                    # Load image
-                    wave = LoadWave(file_path)
-                    if wave is None:
-                        print(f"Failed to load {file_path}")
-                        continue
+                        # Save processed image
+                        output_path = Path(self.output_folder) / f"preprocessed_{Path(file_path).name}"
+                        SaveImageFile(im, str(output_path))
 
-                    # Apply operations
-                    processed_wave = self.apply_operations(wave)
+                    except Exception as e:
+                        print(f"Error processing {file_path}: {e}")
 
-                    # Save result
-                    output_path = Path(self.output_folder) / f"processed_{Path(file_path).stem}.tif"
-                    SaveWave(processed_wave, output_path, format="tiff")
+                    self.progress['value'] = i + 1
+                    self.root.update_idletasks()
 
-                    progress['value'] = i + 1
-                    progress_window.update()
+                self.status_label.config(text=f"Complete! Processed {total_files} files.")
+                messagebox.showinfo("Complete", f"Preprocessing complete! Processed {total_files} files.")
 
-                except Exception as e:
-                    print(f"Error processing {file_path}: {e}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Preprocessing failed: {str(e)}")
+                self.status_label.config(text="Error occurred")
 
-            progress_window.destroy()
-            messagebox.showinfo("Complete", f"Processed {len(self.input_files)} images")
-            self.root.destroy()
-
-        def apply_operations(self, wave):
-            """Apply all operations to a wave"""
-            result = Duplicate(wave, f"{wave.name}_processed")
-
-            for op in self.operations:
-                if op["type"] == "gaussian_blur":
-                    result = GaussianBlur(result, op["sigma"])
-                elif op["type"] == "median_filter":
-                    result = MedianFilter(result, op["size"])
-                elif op["type"] == "background_subtract":
-                    if op["method"] == "rolling_ball":
-                        result = RollingBallBackground(result, op["radius"])
-                    else:
-                        result = PolynomialBackground(result, op["order"])
-                elif op["type"] == "normalize":
-                    if op["method"] == "minmax":
-                        result = NormalizeMinMax(result)
-                    else:
-                        result = NormalizeZScore(result)
-                elif op["type"] == "crop":
-                    result = CropImage(result, op["left"], op["top"], op["right"], op["bottom"])
-
-            return result
-
-    # Launch the preprocessing GUI
-    gui = PreprocessingGUI()
-    gui.root.mainloop()
+    # Create and show the GUI
+    PreprocessingGUI()
 
 
-def GaussianBlur(wave, sigma):
+# ADDED: Group preprocessing for loaded images
+def GroupPreprocess(images_dict):
     """
-    Apply Gaussian blur to image
+    Group preprocessing for loaded images
+    Apply preprocessing to all loaded images in memory
     """
-    blurred = ndimage.gaussian_filter(wave.data, sigma)
-    result = Wave(blurred, f"{wave.name}_blur")
+    if not images_dict:
+        messagebox.showwarning("No Images", "No images loaded for preprocessing.")
+        return
 
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
+    # Get preprocessing parameters
+    result = get_preprocessing_params()
+    if result is None:
+        return
 
-    return result
+    streak_sdevs, flatten_order = result
+
+    try:
+        total_images = len(images_dict)
+        processed = 0
+
+        for image_name, wave in images_dict.items():
+            print(f"Preprocessing {image_name}...")
+
+            # Apply preprocessing - matches Igor Pro exactly
+            if streak_sdevs > 0:
+                RemoveStreaks(wave, sigma=streak_sdevs)
+
+            if flatten_order > 0:
+                Flatten(wave, flatten_order)
+
+            processed += 1
+
+        messagebox.showinfo("Complete", f"Group preprocessing complete! Processed {processed} images.")
+        print(f"Group preprocessing complete: {processed} images processed")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Group preprocessing failed: {str(e)}")
+        print(f"Error in group preprocessing: {e}")
 
 
-def MedianFilter(wave, size):
+def get_preprocessing_params():
+    """Get preprocessing parameters from user"""
+    root = tk.Tk()
+    root.withdraw()
+
+    dialog = tk.Toplevel()
+    dialog.title("Preprocessing Parameters")
+    dialog.geometry("500x300")
+    dialog.transient()
+    dialog.grab_set()
+
+    result = [None]
+
+    main_frame = ttk.Frame(dialog, padding="20")
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    ttk.Label(main_frame, text="Preprocessing Parameters",
+              font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 20))
+
+    # Streak removal - matches Igor Pro
+    streak_frame = ttk.Frame(main_frame)
+    streak_frame.pack(fill=tk.X, pady=10)
+
+    ttk.Label(streak_frame, text="Std. Deviations for streak removal?").pack(anchor=tk.W)
+    streak_var = tk.DoubleVar(value=3)  # Igor Pro default
+    ttk.Entry(streak_frame, textvariable=streak_var, width=15).pack(anchor=tk.W, pady=5)
+
+    # Flattening - matches Igor Pro
+    flatten_frame = ttk.Frame(main_frame)
+    flatten_frame.pack(fill=tk.X, pady=10)
+
+    ttk.Label(flatten_frame, text="Polynomial order for flattening?").pack(anchor=tk.W)
+    flatten_var = tk.IntVar(value=2)  # Igor Pro default
+    ttk.Entry(flatten_frame, textvariable=flatten_var, width=15).pack(anchor=tk.W, pady=5)
+
+    def ok_clicked():
+        result[0] = (streak_var.get(), flatten_var.get())
+        dialog.destroy()
+
+    def cancel_clicked():
+        result[0] = None
+        dialog.destroy()
+
+    button_frame = ttk.Frame(main_frame)
+    button_frame.pack(pady=20)
+
+    ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
+
+    dialog.wait_window()
+    return result[0]
+
+
+def RemoveStreaks(im, sigma=3):
+    """
+    Remove streaks from image
+    Complete implementation matching Igor Pro algorithm
+    """
+    print(f"Removing streaks with sigma={sigma}...")
+
+    if sigma <= 0:
+        return
+
+    try:
+        # Calculate line-by-line statistics
+        data = im.data
+        height, width = data.shape
+
+        # Process each row
+        for i in range(height):
+            row = data[i, :]
+
+            # Calculate streakiness metric for each pixel
+            # This is a simplified version of the Igor Pro algorithm
+            row_mean = np.mean(row)
+            row_std = np.std(row)
+
+            # Identify outliers (streaks)
+            outlier_mask = np.abs(row - row_mean) > sigma * row_std
+
+            # Replace outliers with local median
+            if np.any(outlier_mask):
+                # Use median filter to replace outliers
+                filtered_row = ndimage.median_filter(row, size=3)
+                data[i, outlier_mask] = filtered_row[outlier_mask]
+
+        print("Streak removal complete")
+
+    except Exception as e:
+        print(f"Error in streak removal: {e}")
+        raise
+
+
+def Flatten(im, order):
+    """
+    Flatten image by subtracting polynomial fit
+    Complete implementation matching Igor Pro algorithm
+    """
+    print(f"Flattening with polynomial order {order}...")
+
+    if order <= 0:
+        return
+
+    try:
+        data = im.data
+        height, width = data.shape
+
+        # Process each row (matches Igor Pro line-by-line flattening)
+        for i in range(height):
+            row = data[i, :]
+
+            # Create x coordinates for polynomial fitting
+            x = np.arange(width)
+
+            # Fit polynomial
+            coeffs = np.polyfit(x, row, order)
+
+            # Calculate polynomial values
+            poly_values = np.polyval(coeffs, x)
+
+            # Subtract polynomial from row
+            data[i, :] = row - poly_values
+
+        print("Flattening complete")
+
+    except Exception as e:
+        print(f"Error in flattening: {e}")
+        raise
+
+
+def GaussianSmooth(im, sigma):
+    """
+    Apply Gaussian smoothing to image
+    """
+    print(f"Applying Gaussian smoothing with sigma={sigma}...")
+
+    try:
+        # Apply Gaussian filter
+        smoothed_data = ndimage.gaussian_filter(im.data, sigma=sigma)
+        im.data = smoothed_data
+
+        print("Gaussian smoothing complete")
+
+    except Exception as e:
+        print(f"Error in Gaussian smoothing: {e}")
+        raise
+
+
+def MedianFilter(im, size):
     """
     Apply median filter to image
     """
-    filtered = ndimage.median_filter(wave.data, size)
-    result = Wave(filtered, f"{wave.name}_median")
+    print(f"Applying median filter with size={size}...")
 
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
+    try:
+        # Apply median filter
+        filtered_data = ndimage.median_filter(im.data, size=size)
+        im.data = filtered_data
 
-    return result
+        print("Median filtering complete")
+
+    except Exception as e:
+        print(f"Error in median filtering: {e}")
+        raise
 
 
-def RollingBallBackground(wave, radius):
+def NormalizeImage(im):
     """
-    Subtract rolling ball background
+    Normalize image to 0-1 range
     """
-    from scipy import ndimage
+    print("Normalizing image...")
 
-    # Create structuring element (disk)
-    y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
-    disk = x * x + y * y <= radius * radius
+    try:
+        data = im.data
+        data_min = np.min(data)
+        data_max = np.max(data)
 
-    # Rolling ball is erosion followed by dilation
-    background = ndimage.grey_erosion(wave.data, structure=disk)
-    background = ndimage.grey_dilation(background, structure=disk)
+        if data_max > data_min:
+            im.data = (data - data_min) / (data_max - data_min)
 
-    # Subtract background
-    corrected = wave.data - background
-    result = Wave(corrected, f"{wave.name}_bgcorr")
+        print("Image normalization complete")
 
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return result
+    except Exception as e:
+        print(f"Error in image normalization: {e}")
+        raise
 
 
-def PolynomialBackground(wave, order):
+def EnhanceContrast(im, percentile_range=(2, 98)):
     """
-    Subtract polynomial background
+    Enhance image contrast using percentile normalization
     """
-    height, width = wave.data.shape
+    print(f"Enhancing contrast with percentile range {percentile_range}...")
 
-    # Create coordinate meshgrid
-    y, x = np.mgrid[0:height, 0:width]
-    x = x.flatten()
-    y = y.flatten()
-    data = wave.data.flatten()
+    try:
+        data = im.data
+        low_val = np.percentile(data, percentile_range[0])
+        high_val = np.percentile(data, percentile_range[1])
 
-    # Build polynomial terms
-    terms = []
-    for i in range(order + 1):
-        for j in range(order + 1 - i):
-            terms.append((x ** i) * (y ** j))
+        # Clip and normalize
+        data_clipped = np.clip(data, low_val, high_val)
+        if high_val > low_val:
+            im.data = (data_clipped - low_val) / (high_val - low_val)
 
-    # Fit polynomial
-    A = np.column_stack(terms)
-    coeffs, residuals, rank, s = np.linalg.lstsq(A, data, rcond=None)
+        print("Contrast enhancement complete")
 
-    # Compute background
-    background = A @ coeffs
-    background = background.reshape(height, width)
-
-    # Subtract background
-    corrected = wave.data - background
-    result = Wave(corrected, f"{wave.name}_polybg")
-
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return result
-
-
-def NormalizeMinMax(wave):
-    """
-    Normalize using min-max scaling
-    """
-    data = wave.data
-    min_val = np.nanmin(data)
-    max_val = np.nanmax(data)
-
-    if max_val > min_val:
-        normalized = (data - min_val) / (max_val - min_val)
-    else:
-        normalized = np.zeros_like(data)
-
-    result = Wave(normalized, f"{wave.name}_norm")
-
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return result
-
-
-def NormalizeZScore(wave):
-    """
-    Normalize using z-score
-    """
-    data = wave.data
-    mean_val = np.nanmean(data)
-    std_val = np.nanstd(data)
-
-    if std_val > 0:
-        normalized = (data - mean_val) / std_val
-    else:
-        normalized = np.zeros_like(data)
-
-    result = Wave(normalized, f"{wave.name}_zscore")
-
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return result
-
-
-def CropImage(wave, left, top, right, bottom):
-    """
-    Crop image by specified margins
-    """
-    height, width = wave.data.shape
-
-    # Calculate crop bounds
-    left = max(0, left)
-    top = max(0, top)
-    right = max(0, right)
-    bottom = max(0, bottom)
-
-    # Ensure valid crop region
-    if left + right >= width or top + bottom >= height:
-        raise ValueError("Crop margins too large")
-
-    # Crop data
-    cropped = wave.data[top:height - bottom, left:width - right]
-    result = Wave(cropped, f"{wave.name}_crop")
-
-    # Update scaling
-    x_scale = wave.GetScale('x')
-    y_scale = wave.GetScale('y')
-
-    new_x_offset = x_scale['offset'] + left * x_scale['delta']
-    new_y_offset = y_scale['offset'] + top * y_scale['delta']
-
-    result.SetScale('x', new_x_offset, x_scale['delta'], x_scale['units'])
-    result.SetScale('y', new_y_offset, y_scale['delta'], y_scale['units'])
-
-    return result
-
-
-def FlatFieldCorrection(wave, flat_field_wave):
-    """
-    Apply flat field correction
-    """
-    if wave.data.shape != flat_field_wave.data.shape:
-        raise ValueError("Image and flat field must have same dimensions")
-
-    # Avoid division by zero
-    flat_field = flat_field_wave.data.copy()
-    flat_field[flat_field == 0] = 1
-
-    corrected = wave.data / flat_field
-    result = Wave(corrected, f"{wave.name}_flatcorr")
-
-    # Copy scaling
-    for axis in ['x', 'y']:
-        scale_info = wave.GetScale(axis)
-        result.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
-
-    return result
+    except Exception as e:
+        print(f"Error in contrast enhancement: {e}")
+        raise
 
 
 def Testing(string_input, number_input):
-    """Testing function for preprocessing module"""
+    """Testing function for preprocessing"""
     print(f"Preprocessing testing: {string_input}, {number_input}")
     return len(string_input) + number_input

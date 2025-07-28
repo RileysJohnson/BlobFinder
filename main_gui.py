@@ -93,15 +93,24 @@ class HessianBlobGUI:
         ttk.Button(file_frame, text="Load Folder",
                    command=self.load_folder, width=20).pack(pady=2)
 
+        # ADDED: Preprocessing section
+        preprocess_frame = ttk.LabelFrame(left_frame, text="Preprocessing", padding="10")
+        preprocess_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(preprocess_frame, text="Batch Preprocess",
+                   command=self.batch_preprocess, width=20).pack(pady=2)
+        ttk.Button(preprocess_frame, text="Group Preprocess",
+                   command=self.group_preprocess, width=20).pack(pady=2)
+
         # Loaded images list
         list_frame = ttk.LabelFrame(left_frame, text="Loaded Images", padding="10")
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # Create listbox with scrollbar - FIXED
+        # Create listbox with scrollbar - FIXED: Made shorter
         listbox_frame = ttk.Frame(list_frame)
         listbox_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.images_listbox = tk.Listbox(listbox_frame, selectmode=tk.SINGLE)
+        self.images_listbox = tk.Listbox(listbox_frame, selectmode=tk.SINGLE, height=8)
         scrollbar = ttk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.images_listbox.yview)
         self.images_listbox.configure(yscrollcommand=scrollbar.set)
 
@@ -203,6 +212,33 @@ class HessianBlobGUI:
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
+
+    # ADDED: Preprocessing methods
+    def batch_preprocess(self):
+        """Run batch preprocessing on multiple images"""
+        try:
+            BatchPreprocess()
+            self.log_message("Batch preprocessing interface opened.")
+        except Exception as e:
+            self.log_message(f"Error in batch preprocessing: {str(e)}")
+            messagebox.showerror("Error", f"Error in batch preprocessing: {str(e)}")
+
+    def group_preprocess(self):
+        """Run group preprocessing on loaded images"""
+        if not self.current_images:
+            messagebox.showwarning("No Images", "Please load images first.")
+            return
+
+        try:
+            from preprocessing import GroupPreprocess
+            GroupPreprocess(self.current_images)
+            self.log_message("Group preprocessing completed.")
+            # Refresh display if current image was processed
+            if self.current_display_image:
+                self.display_image()
+        except Exception as e:
+            self.log_message(f"Error in group preprocessing: {str(e)}")
+            messagebox.showerror("Error", f"Error in group preprocessing: {str(e)}")
 
     def load_image(self):
         """Load a single image file"""
