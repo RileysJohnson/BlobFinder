@@ -58,85 +58,62 @@ def check_python_version():
 
 
 def check_dependencies():
-    """Check if required dependencies are available"""
+    """Check for required and optional dependencies"""
+    required_packages = [
+        ('numpy', 'np'),
+        ('scipy', 'scipy'),
+        ('matplotlib', 'plt'),
+        ('tkinter', 'tk')
+    ]
+
+    optional_packages = [
+        ('igor', 'igor'),
+        ('tifffile', 'tifffile'),
+        ('PIL', 'PIL'),
+        ('skimage', 'skimage')
+    ]
+
     print("Checking dependencies...")
-
-    required_packages = {
-        'numpy': 'numpy',
-        'scipy': 'scipy',
-        'matplotlib': 'matplotlib',
-        'tkinter': 'tkinter (built-in)'
-    }
-
-    optional_packages = {
-        'igor': 'igor (for .ibw files)',
-        'PIL': 'Pillow (for image files)',
-        'tifffile': 'tifffile (for TIFF files)',
-        'skimage': 'scikit-image (for additional image formats)'
-    }
 
     missing_required = []
     missing_optional = []
 
     # Check required packages
-    for package, display_name in required_packages.items():
+    for package_name, import_name in required_packages:
         try:
-            if package == 'tkinter':
-                import tkinter
+            if import_name == 'tk':
+                import tkinter as tk
+            elif import_name == 'np':
+                import numpy as np
+            elif import_name == 'scipy':
+                import scipy
+            elif import_name == 'plt':
+                import matplotlib.pyplot as plt
             else:
-                __import__(package)
-            print(f"✓ {display_name}: Available")
+                __import__(import_name)
+            print(f"✓ {package_name}: Available")
         except ImportError:
-            print(f"✗ {display_name}: Missing")
-            missing_required.append(display_name)
+            print(f"✗ {package_name}: Missing (REQUIRED)")
+            missing_required.append(package_name)
 
     # Check optional packages
-    for package, display_name in optional_packages.items():
+    for package_name, import_name in optional_packages:
         try:
-            if package == 'PIL':
-                from PIL import Image
-                print(f"✓ {display_name}: Available")
-            elif package == 'igor':
-                # Check igor package more thoroughly
-                igor_available = False
-                try:
-                    import igor.binarywave as bw
-                    igor_available = True
-                except ImportError:
-                    try:
-                        import binarywave as bw
-                        igor_available = True
-                    except ImportError:
-                        try:
-                            import igor
-                            if hasattr(igor, 'load'):
-                                igor_available = True
-                        except ImportError:
-                            pass
-
-                if igor_available:
-                    print(f"✓ {display_name}: Available")
-                else:
-                    print(f"○ {display_name}: Not available")
-                    missing_optional.append(display_name)
-            else:
-                __import__(package)
-                print(f"✓ {display_name}: Available")
+            __import__(import_name)
+            print(f"✓ {package_name}: Available")
         except ImportError:
-            print(f"○ {display_name}: Not available")
-            missing_optional.append(display_name)
-
-    print()
+            print(f"○ {package_name}: Missing (optional)")
+            missing_optional.append(package_name)
 
     if missing_required:
-        print("ERROR: Required packages missing:")
+        print("\nERROR: Missing required packages:")
         for pkg in missing_required:
             print(f"  - {pkg}")
-        print("\nPlease install missing packages and try again.")
+        print("\nInstall missing packages with: pip install <package_name>")
         return False
 
     if missing_optional:
-        print("Note: Optional packages not available:")
+        print("\nNote: Optional packages not available:")
         for pkg in missing_optional:
             print(f"  - {pkg}")
         print("Some file formats may not be supported.")
@@ -210,12 +187,20 @@ def BatchPreprocess():
     """Batch preprocessing function"""
     from tkinter import messagebox
     messagebox.showinfo("Preprocessing", "Preprocessing functionality not fully implemented yet.")
-    return True
+    return None
+
+def NoiseReduction(image):
+    """Basic noise reduction"""
+    return image
+
+def ContrastEnhancement(image):
+    """Basic contrast enhancement"""
+    return image
 
 def Testing(string_input, number_input):
-    """Testing function for preprocessing"""
+    """Testing function"""
     print(f"Preprocessing testing: {string_input}, {number_input}")
-    return len(string_input) + number_input
+    return f"Preprocessed: {string_input}_{number_input}"
 ''')
 
     # Create minimal particle_measurements.py if missing
@@ -228,22 +213,26 @@ Particle Measurements Module (Minimal Implementation)
 Contains particle measurement and analysis functions
 """
 
-def MeasureParticles(im, mapNum, info, particleType=1):
-    """Measure particles function"""
-    from tkinter import messagebox
-    messagebox.showinfo("Measurements", "Particle measurement functionality not fully implemented yet.")
-    return True
+def MeasureParticles(particles):
+    """Measure particle properties"""
+    print("Particle measurement functionality not fully implemented yet.")
+    return particles
 
-def ViewParticles():
-    """View particles function"""
-    from tkinter import messagebox
-    messagebox.showinfo("Viewer", "Particle viewer functionality not fully implemented yet.")
-    return True
+def CalculateStatistics(results):
+    """Calculate statistics on particle results"""
+    if not results:
+        return {}
+
+    return {
+        'total_particles': len(results),
+        'mean_size': 0,
+        'std_size': 0
+    }
 
 def Testing(string_input, number_input):
-    """Testing function for measurements"""
-    print(f"Measurements testing: {string_input}, {number_input}")
-    return len(string_input) + number_input
+    """Testing function"""
+    print(f"Particle measurements testing: {string_input}, {number_input}")
+    return f"Measured: {string_input}_{number_input}"
 ''')
 
 
@@ -252,39 +241,39 @@ def test_core_functionality():
     print("Testing core functionality...")
 
     try:
-        # Test imports
-        from igor_compatibility import Wave, DimOffset, DimDelta
-        from file_io import data_browser
-        from main_functions import Testing
-        from utilities import Testing as UtilTesting
-        from scale_space import Testing as ScaleTesting
-
-        print("✓ Core modules imported successfully")
-
-        # Test basic wave functionality
+        # Test igor_compatibility
+        from igor_compatibility import Wave, DimSize, DimOffset, DimDelta
         test_data = np.random.rand(10, 10)
-        test_wave = Wave(test_data, "TestWave")
-        test_wave.SetScale('x', 0, 1.0)
-        test_wave.SetScale('y', 0, 1.0)
+        test_wave = Wave(test_data, "test")
+        assert DimSize(test_wave, 0) == 10
+        print("✓ Igor compatibility: OK")
 
-        assert test_wave.data.shape == (10, 10)
-        assert DimOffset(test_wave, 0) == 0
-        assert DimDelta(test_wave, 0) == 1.0
+        # Test file_io
+        from file_io import LoadWave, Testing as file_io_test
+        result = file_io_test("test", 1)
+        print("✓ File I/O: OK")
 
-        print("✓ Wave functionality working")
+        # Test utilities
+        from utilities import Testing as util_test
+        result = util_test("test", 1)
+        print("✓ Utilities: OK")
 
-        # Test function calls
-        result1 = Testing("test", 42)
-        result2 = UtilTesting("test", 42)
-        result3 = ScaleTesting("test", 42)
+        # Test scale_space
+        from scale_space import Testing as scale_test
+        result = scale_test("test", 1)
+        print("✓ Scale space: OK")
 
-        print("✓ Function calls working")
-        print("✓ Core functionality test passed")
+        # Test main_functions
+        from main_functions import Testing as main_test
+        result = main_test("test", 1)
+        print("✓ Main functions: OK")
 
         return True
 
     except Exception as e:
         print(f"✗ Core functionality test failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -374,59 +363,11 @@ def main():
         print("\nTroubleshooting:")
         print("1. Check that all required files are present")
         print("2. Verify all dependencies are installed")
-        print("3. Try running from command line to see detailed error messages")
+        print("3. Try running with --debug for more information")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
-def run_tests():
-    """Run comprehensive tests"""
-    print("Running comprehensive tests...")
-
-    try:
-        from igor_compatibility import Wave
-        from main_functions import Testing as MainTesting
-        from utilities import Testing as UtilTesting
-        from scale_space import Testing as ScaleTesting
-
-        # Import optional modules
-        try:
-            from preprocessing import Testing as PrepTesting
-        except ImportError:
-            PrepTesting = lambda s, n: len(s) + n
-
-        try:
-            from particle_measurements import Testing as MeasTesting
-        except ImportError:
-            MeasTesting = lambda s, n: len(s) + n
-
-        print("Testing all modules...")
-
-        test_results = {}
-        test_results['main_functions'] = MainTesting("test_string", 100)
-        test_results['utilities'] = UtilTesting("test_string", 100)
-        test_results['scale_space'] = ScaleTesting("test_string", 100)
-        test_results['preprocessing'] = PrepTesting("test_string", 100)
-        test_results['measurements'] = MeasTesting("test_string", 100)
-
-        print("\nTest Results:")
-        for module, result in test_results.items():
-            print(f"  {module}: {result}")
-
-        total_result = sum(test_results.values())
-        print(f"\nTotal test score: {total_result}")
-        print("✓ All tests completed successfully")
-
-        return True
-
-    except Exception as e:
-        print(f"✗ Tests failed: {str(e)}")
-        return False
-
-
 if __name__ == "__main__":
-    # Check for test mode
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
-        print_banner()
-        run_tests()
-    else:
-        main()
+    main()

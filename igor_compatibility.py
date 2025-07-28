@@ -1,107 +1,170 @@
 """
-Igor Pro Compatibility Layer
-Recreates Igor Pro native functions to maintain 1-1 code compatibility
-Complete implementation with all necessary functions for blob detection
-FIXED: Added missing Duplicate function and other required functions
+Igor Pro Compatibility Module
+Provides Igor Pro-like functionality for Python implementation
+Direct port maintaining same variable names and function signatures
+FIXED: Enhanced compatibility functions for blob detection
 """
 
 import numpy as np
-from scipy import ndimage, fft
-from scipy.optimize import curve_fit
 import warnings
-import tkinter as tk
 
-# Monkey patch for numpy complex deprecation (NumPy 1.20+)
+# Monkey patch for numpy complex deprecation
 if not hasattr(np, 'complex'):
     np.complex = complex
 
 
 class Wave:
     """
-    Mimics Igor Pro wave structure with complete functionality
+    Igor Pro Wave equivalent
+    Maintains data, name, scaling, and notes like Igor Pro waves
     """
 
-    def __init__(self, data=None, name="", note=""):
-        if data is None:
-            self.data = np.array([])
-        else:
-            self.data = np.array(data, dtype=np.float64)
-        self.name = str(name)
-        self.note = str(note)
+    def __init__(self, data, name="", note=""):
+        self.data = np.asarray(data)
+        self.name = name
+        self.note = note
 
-        # Scaling information for each dimension
-        self.scaling = {
+        # Initialize scaling for all dimensions
+        self._scaling = {
             'x': {'offset': 0.0, 'delta': 1.0, 'units': ''},
             'y': {'offset': 0.0, 'delta': 1.0, 'units': ''},
             'z': {'offset': 0.0, 'delta': 1.0, 'units': ''},
             't': {'offset': 0.0, 'delta': 1.0, 'units': ''}
         }
 
-    def __getitem__(self, key):
-        return self.data[key]
-
-    def __setitem__(self, key, value):
-        self.data[key] = value
-
-    def __len__(self):
-        return len(self.data)
-
-    def __str__(self):
-        return f"Wave '{self.name}': shape={self.data.shape}, dtype={self.data.dtype}"
-
-    def __repr__(self):
-        return self.__str__()
-
-    @property
-    def shape(self):
-        return self.data.shape
-
-    @property
-    def size(self):
-        return self.data.size
-
-    @property
-    def dtype(self):
-        return self.data.dtype
-
     def SetScale(self, axis, offset, delta, units=""):
-        """Set scaling for wave dimension - matches Igor Pro SetScale"""
-        axis_key = axis.lower()
-        if axis_key in self.scaling:
-            self.scaling[axis_key] = {
-                'offset': float(offset),
-                'delta': float(delta),
-                'units': str(units)
-            }
+        """Set scaling for specified axis (matching Igor Pro SetScale)"""
+        if axis.lower() in self._scaling:
+            self._scaling[axis.lower()]['offset'] = offset
+            self._scaling[axis.lower()]['delta'] = delta
+            self._scaling[axis.lower()]['units'] = units
 
     def GetScale(self, axis):
-        """Get scaling information for a dimension"""
-        axis_key = axis.lower()
-        if axis_key in self.scaling:
-            return self.scaling[axis_key]
-        return {'offset': 0.0, 'delta': 1.0, 'units': ''}
+        """Get scaling information for specified axis"""
+        return self._scaling.get(axis.lower(), {'offset': 0.0, 'delta': 1.0, 'units': ''})
 
-    def copy(self):
-        """Create a copy of this wave"""
-        new_wave = Wave(self.data.copy(), self.name + "_copy", self.note)
-        for axis in self.scaling:
-            new_wave.scaling[axis] = self.scaling[axis].copy()
-        return new_wave
+    def __repr__(self):
+        return f"Wave('{self.name}', shape={self.data.shape}, dtype={self.data.dtype})"
 
 
-# FIXED: Added missing Duplicate function
+def DimSize(wave, dimension):
+    """
+    Get size of specified dimension (matching Igor Pro DimSize)
+
+    Parameters:
+    wave : Wave - Input wave
+    dimension : int - Dimension index (0=rows/y, 1=cols/x, 2=layers/z, 3=chunks/t)
+
+    Returns:
+    int - Size of dimension
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    if dimension < 0 or dimension >= len(wave.data.shape):
+        return 0
+
+    return wave.data.shape[dimension]
+
+
+def DimOffset(wave, dimension):
+    """
+    Get offset of specified dimension (matching Igor Pro DimOffset)
+
+    Parameters:
+    wave : Wave - Input wave
+    dimension : int - Dimension index
+
+    Returns:
+    float - Offset value
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    axis_map = {0: 'y', 1: 'x', 2: 'z', 3: 't'}
+    axis = axis_map.get(dimension, 'x')
+
+    return wave.GetScale(axis)['offset']
+
+
+def DimDelta(wave, dimension):
+    """
+    Get delta (spacing) of specified dimension (matching Igor Pro DimDelta)
+
+    Parameters:
+    wave : Wave - Input wave
+    dimension : int - Dimension index
+
+    Returns:
+    float - Delta value
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    axis_map = {0: 'y', 1: 'x', 2: 'z', 3: 't'}
+    axis = axis_map.get(dimension, 'x')
+
+    return wave.GetScale(axis)['delta']
+
+
+def ScaleToIndex(wave, scale_value, dimension):
+    """
+    Convert scale value to index (matching Igor Pro ScaleToIndex)
+
+    Parameters:
+    wave : Wave - Input wave
+    scale_value : float - Scale coordinate value
+    dimension : int - Dimension index
+
+    Returns:
+    int - Corresponding index
+    """
+    offset = DimOffset(wave, dimension)
+    delta = DimDelta(wave, dimension)
+
+    if delta == 0:
+        return 0
+
+    index = int(round((scale_value - offset) / delta))
+
+    # Clamp to valid range
+    max_index = DimSize(wave, dimension) - 1
+    return max(0, min(index, max_index))
+
+
+def IndexToScale(wave, index, dimension):
+    """
+    Convert index to scale value (matching Igor Pro IndexToScale)
+
+    Parameters:
+    wave : Wave - Input wave
+    index : int - Index value
+    dimension : int - Dimension index
+
+    Returns:
+    float - Corresponding scale coordinate
+    """
+    offset = DimOffset(wave, dimension)
+    delta = DimDelta(wave, dimension)
+
+    return offset + index * delta
+
+
 def Duplicate(source_wave, new_name):
     """
-    Create a duplicate of a wave - matches Igor Pro Duplicate function
-    This was the missing function causing errors in main_functions.py
+    Create a duplicate of a wave (matching Igor Pro Duplicate)
 
     Parameters:
     source_wave : Wave - Source wave to duplicate
     new_name : str - Name for the new wave
 
     Returns:
-    Wave - New wave that is a copy of the source
+    Wave - Duplicated wave
     """
+    if not isinstance(source_wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    # Create new wave with copied data
     new_data = source_wave.data.copy()
     new_wave = Wave(new_data, new_name, source_wave.note)
 
@@ -113,381 +176,590 @@ def Duplicate(source_wave, new_name):
     return new_wave
 
 
-# Igor Pro function equivalents for wave scaling
-def DimOffset(wave, dimension):
-    """Igor DimOffset function equivalent"""
-    if dimension == 0:
-        return wave.GetScale('x')['offset']
-    elif dimension == 1:
-        return wave.GetScale('y')['offset']
-    elif dimension == 2:
-        return wave.GetScale('z')['offset']
-    elif dimension == 3:
-        return wave.GetScale('t')['offset']
-    else:
-        return 0.0
+def Make(dimensions, wave_type="/O", name="temp"):
+    """
+    Create a new wave (matching Igor Pro Make command)
 
+    Parameters:
+    dimensions : tuple or int - Dimensions of the wave
+    wave_type : str - Wave type specification (ignored in Python)
+    name : str - Wave name
 
-def DimDelta(wave, dimension):
-    """Igor DimDelta function equivalent"""
-    if dimension == 0:
-        return wave.GetScale('x')['delta']
-    elif dimension == 1:
-        return wave.GetScale('y')['delta']
-    elif dimension == 2:
-        return wave.GetScale('z')['delta']
-    elif dimension == 3:
-        return wave.GetScale('t')['delta']
-    else:
-        return 1.0
-
-
-def DimSize(wave, dimension):
-    """Igor DimSize function equivalent"""
-    if wave.data.ndim > dimension:
-        return wave.data.shape[dimension]
-    else:
-        return 0
-
-
-def DimUnits(wave, dimension):
-    """Igor DimUnits function equivalent"""
-    if dimension == 0:
-        return wave.GetScale('x')['units']
-    elif dimension == 1:
-        return wave.GetScale('y')['units']
-    elif dimension == 2:
-        return wave.GetScale('z')['units']
-    elif dimension == 3:
-        return wave.GetScale('t')['units']
-    else:
-        return ""
-
-
-def WaveMin(wave):
-    """Igor WaveMin function equivalent"""
-    return np.nanmin(wave.data)
-
-
-def WaveMax(wave):
-    """Igor WaveMax function equivalent"""
-    return np.nanmax(wave.data)
-
-
-def NumPnts(wave):
-    """Igor numpnts function equivalent"""
-    return wave.data.size
-
-
-def NumDimensions(wave):
-    """Igor NumDimensions function equivalent"""
-    return wave.data.ndim
-
-
-# Mathematical functions
-def Sqrt(x):
-    """Igor sqrt function equivalent"""
-    return np.sqrt(x)
-
-
-def Exp(x):
-    """Igor exp function equivalent"""
-    return np.exp(x)
-
-
-def Log(x):
-    """Igor ln function equivalent (natural log)"""
-    return np.log(x)
-
-
-def Log10(x):
-    """Igor log function equivalent (base 10)"""
-    return np.log10(x)
-
-
-def Sin(x):
-    """Igor sin function equivalent"""
-    return np.sin(x)
-
-
-def Cos(x):
-    """Igor cos function equivalent"""
-    return np.cos(x)
-
-
-def Tan(x):
-    """Igor tan function equivalent"""
-    return np.tan(x)
-
-
-def ASin(x):
-    """Igor asin function equivalent"""
-    return np.arcsin(x)
-
-
-def ACos(x):
-    """Igor acos function equivalent"""
-    return np.arccos(x)
-
-
-def ATan(x):
-    """Igor atan function equivalent"""
-    return np.arctan(x)
-
-
-def ATan2(y, x):
-    """Igor atan2 function equivalent"""
-    return np.arctan2(y, x)
-
-
-def Abs(x):
-    """Igor abs function equivalent"""
-    return np.abs(x)
-
-
-def Sign(x):
-    """Igor sign function equivalent"""
-    return np.sign(x)
-
-
-def Max(*args):
-    """Igor max function equivalent"""
-    if len(args) == 1:
-        return np.nanmax(args[0])
-    else:
-        return np.maximum.reduce([np.array(arg) for arg in args])
-
-
-def Min(*args):
-    """Igor min function equivalent"""
-    if len(args) == 1:
-        return np.nanmin(args[0])
-    else:
-        return np.minimum.reduce([np.array(arg) for arg in args])
-
-
-def Ceil(x):
-    """Igor ceil function equivalent"""
-    return np.ceil(x)
-
-
-def Floor(x):
-    """Igor floor function equivalent"""
-    return np.floor(x)
-
-
-def Round(x):
-    """Igor round function equivalent"""
-    return np.round(x)
-
-
-def Trunc(x):
-    """Igor trunc function equivalent"""
-    return np.trunc(x)
-
-
-def Mod(x, y):
-    """Igor mod function equivalent"""
-    return np.mod(x, y)
-
-
-def SelectNumber(condition, false_value, true_value):
-    """Igor SelectNumber function equivalent"""
-    return np.where(condition, true_value, false_value)
-
-
-# Wave creation functions
-def Make(name, dimensions, wave_type=None, value=0):
-    """Igor Make function equivalent"""
-    if isinstance(dimensions, (int, float)):
-        # 1D wave
-        data = np.full(int(dimensions), value, dtype=np.float64)
+    Returns:
+    Wave - New wave filled with zeros
+    """
+    if isinstance(dimensions, int):
+        dimensions = (dimensions,)
     elif isinstance(dimensions, (list, tuple)):
-        # Multi-dimensional wave
-        data = np.full(dimensions, value, dtype=np.float64)
+        dimensions = tuple(dimensions)
     else:
-        raise ValueError("Invalid dimensions for Make function")
+        raise TypeError("Dimensions must be int, list, or tuple")
+
+    # Create array filled with zeros
+    data = np.zeros(dimensions)
 
     return Wave(data, name)
 
 
-def SetScale(wave, axis, start, delta, units=""):
-    """Igor SetScale function equivalent"""
-    wave.SetScale(axis.lower(), start, delta, units)
+def Concatenate(wave_list, axis=0, new_name="concatenated"):
+    """
+    Concatenate waves along specified axis (matching Igor Pro Concatenate)
 
+    Parameters:
+    wave_list : list - List of Wave objects to concatenate
+    axis : int - Axis along which to concatenate
+    new_name : str - Name for result wave
 
-def IndexToScale(wave, index, dimension):
-    """Igor IndexToScale function equivalent"""
-    offset = DimOffset(wave, dimension)
-    delta = DimDelta(wave, dimension)
-    return offset + index * delta
+    Returns:
+    Wave - Concatenated wave
+    """
+    if not wave_list:
+        raise ValueError("Wave list cannot be empty")
 
+    # Extract data arrays
+    data_arrays = [wave.data for wave in wave_list if isinstance(wave, Wave)]
 
-def ScaleToIndex(wave, value, dimension):
-    """Igor ScaleToIndex function equivalent"""
-    offset = DimOffset(wave, dimension)
-    delta = DimDelta(wave, dimension)
-    if delta == 0:
-        return 0
-    return int((value - offset) / delta)
+    if not data_arrays:
+        raise ValueError("No valid Wave objects in list")
 
+    # Concatenate data
+    concatenated_data = np.concatenate(data_arrays, axis=axis)
 
-def Concatenate(waves, output_name, axis=2):
-    """Igor Concatenate function equivalent"""
-    if isinstance(waves, list):
-        data_list = [w.data for w in waves]
-    else:
-        # Assume waves is a list of wave names or similar
-        raise NotImplementedError("String-based concatenation not implemented")
-
-    # Concatenate along specified axis
-    concatenated_data = np.stack(data_list, axis=axis)
-
-    # Create output wave
-    output_wave = Wave(concatenated_data, output_name)
+    # Create result wave
+    result_wave = Wave(concatenated_data, new_name)
 
     # Copy scaling from first wave
-    if waves:
-        first_wave = waves[0]
-        for dim_name in ['x', 'y', 'z', 't']:
-            scale_info = first_wave.GetScale(dim_name)
-            output_wave.SetScale(dim_name, scale_info['offset'], scale_info['delta'], scale_info['units'])
+    first_wave = wave_list[0]
+    for dim_axis in ['x', 'y', 'z', 't']:
+        scale_info = first_wave.GetScale(dim_axis)
+        result_wave.SetScale(dim_axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
 
-    return output_wave
+    return result_wave
+
+
+def MatrixOp(operation, *args, **kwargs):
+    """
+    Matrix operations (simplified Igor Pro MatrixOp equivalent)
+
+    Parameters:
+    operation : str - Operation to perform
+    args : various - Arguments for operation
+    kwargs : various - Additional options
+
+    Returns:
+    Wave - Result of operation
+    """
+    # This is a simplified implementation
+    # Full Igor Pro MatrixOp has many more operations
+
+    if operation.lower() == "convolve":
+        # Simple convolution
+        if len(args) >= 2:
+            wave1, kernel = args[0], args[1]
+            if isinstance(wave1, Wave) and isinstance(kernel, Wave):
+                from scipy import ndimage
+                result_data = ndimage.convolve(wave1.data, kernel.data, mode='constant')
+                return Wave(result_data, f"{wave1.name}_conv")
+
+    elif operation.lower() == "fp32":
+        # Convert to 32-bit float
+        if len(args) >= 1 and isinstance(args[0], Wave):
+            result_data = args[0].data.astype(np.float32)
+            return Wave(result_data, f"{args[0].name}_fp32")
+
+    # Default: return first argument if it's a wave
+    if args and isinstance(args[0], Wave):
+        return args[0]
+
+    raise NotImplementedError(f"MatrixOp operation '{operation}' not implemented")
+
+
+def FFT(wave, destination=None):
+    """
+    Fast Fourier Transform (matching Igor Pro FFT)
+
+    Parameters:
+    wave : Wave - Input wave
+    destination : Wave - Output wave (optional)
+
+    Returns:
+    Wave - FFT result
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    # Compute FFT
+    fft_data = np.fft.fft2(wave.data).astype(np.complex128)
+
+    # Create result wave
+    if destination is None:
+        result_wave = Wave(fft_data, f"{wave.name}_FFT")
+    else:
+        destination.data = fft_data
+        result_wave = destination
+
+    # Copy scaling
+    for axis in ['x', 'y', 'z', 't']:
+        scale_info = wave.GetScale(axis)
+        result_wave.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
+
+    return result_wave
+
+
+def IFFT(wave, destination=None):
+    """
+    Inverse Fast Fourier Transform (matching Igor Pro IFFT)
+
+    Parameters:
+    wave : Wave - Input wave (complex)
+    destination : Wave - Output wave (optional)
+
+    Returns:
+    Wave - IFFT result
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    # Compute IFFT and take real part
+    ifft_data = np.fft.ifft2(wave.data).real
+
+    # Create result wave
+    if destination is None:
+        result_wave = Wave(ifft_data, f"{wave.name}_IFFT")
+    else:
+        destination.data = ifft_data
+        result_wave = destination
+
+    # Copy scaling
+    for axis in ['x', 'y', 'z', 't']:
+        scale_info = wave.GetScale(axis)
+        result_wave.SetScale(axis, scale_info['offset'], scale_info['delta'], scale_info['units'])
+
+    return result_wave
+
+
+def KillWaves(*wave_names):
+    """
+    Delete waves (matching Igor Pro KillWaves)
+    In Python, this is mostly for Igor Pro compatibility
+
+    Parameters:
+    wave_names : str - Names of waves to delete
+    """
+    # In Python, we can't really "kill" variables from arbitrary scopes
+    # This function exists for Igor Pro compatibility but doesn't do much
+    pass
+
+
+def SetScale(wave, axis, offset, delta, units=""):
+    """
+    Set scaling for wave dimension (matching Igor Pro SetScale)
+
+    Parameters:
+    wave : Wave - Target wave
+    axis : str - Axis identifier ('x', 'y', 'z', 't')
+    offset : float - Offset value
+    delta : float - Delta (spacing) value
+    units : str - Units string
+    """
+    if isinstance(wave, Wave):
+        wave.SetScale(axis, offset, delta, units)
+
+
+def Note(wave, note_text=""):
+    """
+    Set or get wave note (matching Igor Pro Note)
+
+    Parameters:
+    wave : Wave - Target wave
+    note_text : str - Note text to set (empty to get current note)
+
+    Returns:
+    str - Current note (if getting)
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    if note_text:
+        wave.note = note_text
+    else:
+        return wave.note
+
+
+def WaveExists(wave_name):
+    """
+    Check if wave exists (Igor Pro compatibility)
+    Always returns True in Python since we pass Wave objects directly
+
+    Parameters:
+    wave_name : str - Name of wave to check
+
+    Returns:
+    bool - True if wave exists
+    """
+    return True
 
 
 def Redimension(wave, *new_dimensions):
-    """Igor Redimension function equivalent"""
-    if len(new_dimensions) == 1:
-        # 1D redimension
-        new_size = new_dimensions[0]
-        if new_size > wave.data.size:
-            # Extend with zeros
-            padding = new_size - wave.data.size
-            wave.data = np.pad(wave.data.flatten(), (0, padding), 'constant')
+    """
+    Change dimensions of wave (matching Igor Pro Redimension)
+
+    Parameters:
+    wave : Wave - Wave to redimension
+    new_dimensions : int - New dimension sizes
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    if new_dimensions:
+        # Reshape the data
+        total_elements = np.prod(wave.data.shape)
+        new_total = np.prod(new_dimensions)
+
+        if new_total == total_elements:
+            wave.data = wave.data.reshape(new_dimensions)
         else:
-            # Truncate
-            wave.data = wave.data.flatten()[:new_size]
-    else:
-        # Multi-dimensional redimension
-        try:
-            wave.data = np.resize(wave.data, new_dimensions)
-        except Exception as e:
-            print(f"Redimension error: {e}")
+            # Create new array with different size
+            new_data = np.zeros(new_dimensions, dtype=wave.data.dtype)
+            # Copy as much data as possible
+            flat_old = wave.data.flatten()
+            flat_new = new_data.flatten()
+            copy_size = min(len(flat_old), len(flat_new))
+            flat_new[:copy_size] = flat_old[:copy_size]
+            wave.data = new_data
 
 
-# Interpolation functions
-def Interp(x_wave, y_wave, x_val):
-    """Igor Interp function equivalent"""
-    return np.interp(x_val, x_wave.data, y_wave.data)
+def DeletePoints(wave, start_point, num_points, dimension=0):
+    """
+    Delete points from wave (matching Igor Pro DeletePoints)
+
+    Parameters:
+    wave : Wave - Wave to modify
+    start_point : int - Starting point index
+    num_points : int - Number of points to delete
+    dimension : int - Dimension to delete from
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    # Use numpy delete
+    wave.data = np.delete(wave.data,
+                          range(start_point, start_point + num_points),
+                          axis=dimension)
 
 
-def Interp2D(wave, x, y):
-    """Igor Interp2D function equivalent"""
-    from scipy.interpolate import RegularGridInterpolator
+def InsertPoints(wave, start_point, num_points, dimension=0):
+    """
+    Insert points into wave (matching Igor Pro InsertPoints)
 
-    # Create coordinate arrays based on wave scaling
-    if len(wave.data.shape) >= 2:
-        x_coords = np.arange(wave.data.shape[1]) * DimDelta(wave, 0) + DimOffset(wave, 0)
-        y_coords = np.arange(wave.data.shape[0]) * DimDelta(wave, 1) + DimOffset(wave, 1)
+    Parameters:
+    wave : Wave - Wave to modify
+    start_point : int - Starting point index
+    num_points : int - Number of points to insert
+    dimension : int - Dimension to insert into
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
 
-        # Note: RegularGridInterpolator expects (y, x) order for 2D data
-        interpolator = RegularGridInterpolator((y_coords, x_coords), wave.data,
-                                               method='linear', bounds_error=False, fill_value=0)
+    # Create zeros to insert
+    insert_shape = list(wave.data.shape)
+    insert_shape[dimension] = num_points
+    zeros_to_insert = np.zeros(insert_shape, dtype=wave.data.dtype)
 
-        return interpolator([y, x])[0]
-    else:
-        raise ValueError("Wave must be at least 2D for Interp2D")
-
-
-# Display functions (simplified - these would typically create Igor windows)
-def Display(*waves, **kwargs):
-    """Igor Display function equivalent (simplified)"""
-    print(f"Would display waves: {[w.name for w in waves]}")
-    # In a full implementation, this would create a plot window
+    # Insert the zeros
+    wave.data = np.insert(wave.data, start_point, zeros_to_insert, axis=dimension)
 
 
-def AppendToGraph(*waves, **kwargs):
-    """Igor AppendToGraph function equivalent (simplified)"""
-    print(f"Would append to graph: {[w.name for w in waves]}")
+def FindValue(wave, value, start_point=0):
+    """
+    Find value in wave (matching Igor Pro FindValue)
+
+    Parameters:
+    wave : Wave - Wave to search
+    value : float - Value to find
+    start_point : int - Starting point for search
+
+    Returns:
+    int - Index of found value (-1 if not found)
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    # Flatten array for searching
+    flat_data = wave.data.flatten()
+
+    # Search from start_point
+    for i in range(start_point, len(flat_data)):
+        if np.isclose(flat_data[i], value):
+            return i
+
+    return -1  # Not found
 
 
-def ModifyGraph(**kwargs):
-    """Igor ModifyGraph function equivalent (simplified)"""
-    print(f"Would modify graph with: {kwargs}")
+def WaveMax(wave):
+    """
+    Find maximum value in wave (matching Igor Pro WaveMax)
+
+    Parameters:
+    wave : Wave - Input wave
+
+    Returns:
+    float - Maximum value
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    return np.max(wave.data)
 
 
-# String functions
-def StringFromList(position, str_list, list_sep=";"):
-    """Igor StringFromList function equivalent"""
-    items = str_list.split(list_sep)
-    if 0 <= position < len(items):
-        return items[position]
-    else:
-        return ""
+def WaveMin(wave):
+    """
+    Find minimum value in wave (matching Igor Pro WaveMin)
+
+    Parameters:
+    wave : Wave - Input wave
+
+    Returns:
+    float - Minimum value
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    return np.min(wave.data)
 
 
-def StringMatch(string, pattern):
-    """Igor StringMatch function equivalent (simplified)"""
-    import fnmatch
-    return fnmatch.fnmatch(string, pattern)
+def Sum(wave):
+    """
+    Sum all elements in wave (matching Igor Pro Sum)
+
+    Parameters:
+    wave : Wave - Input wave
+
+    Returns:
+    float - Sum of all elements
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    return np.sum(wave.data)
 
 
-def StrLen(string):
-    """Igor strlen function equivalent"""
-    return len(str(string))
+def Mean(wave):
+    """
+    Calculate mean of wave (matching Igor Pro Mean)
+
+    Parameters:
+    wave : Wave - Input wave
+
+    Returns:
+    float - Mean value
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    return np.mean(wave.data)
 
 
-def LowerStr(string):
-    """Igor LowerStr function equivalent"""
-    return str(string).lower()
+def StdDev(wave):
+    """
+    Calculate standard deviation of wave (matching Igor Pro StdDev)
+
+    Parameters:
+    wave : Wave - Input wave
+
+    Returns:
+    float - Standard deviation
+    """
+    if not isinstance(wave, Wave):
+        raise TypeError("Input must be a Wave object")
+
+    return np.std(wave.data)
 
 
-def UpperStr(string):
-    """Igor UpperStr function equivalent"""
-    return str(string).upper()
+def Cmplx(real_part, imag_part):
+    """
+    Create complex number (matching Igor Pro Cmplx)
+
+    Parameters:
+    real_part : float - Real part
+    imag_part : float - Imaginary part
+
+    Returns:
+    complex - Complex number
+    """
+    return complex(real_part, imag_part)
+
+
+def Real(complex_value):
+    """
+    Extract real part (matching Igor Pro Real)
+
+    Parameters:
+    complex_value : complex - Complex number
+
+    Returns:
+    float - Real part
+    """
+    return complex_value.real if isinstance(complex_value, complex) else float(complex_value)
+
+
+def Imag(complex_value):
+    """
+    Extract imaginary part (matching Igor Pro Imag)
+
+    Parameters:
+    complex_value : complex - Complex number
+
+    Returns:
+    float - Imaginary part
+    """
+    return complex_value.imag if isinstance(complex_value, complex) else 0.0
 
 
 def Num2Str(number):
-    """Igor Num2Str function equivalent"""
+    """
+    Convert number to string (matching Igor Pro Num2Str)
+
+    Parameters:
+    number : float/int - Number to convert
+
+    Returns:
+    str - String representation
+    """
     return str(number)
 
 
 def Str2Num(string):
-    """Igor Str2Num function equivalent"""
+    """
+    Convert string to number (matching Igor Pro Str2Num)
+
+    Parameters:
+    string : str - String to convert
+
+    Returns:
+    float - Numeric value (NaN if conversion fails)
+    """
     try:
-        if '.' in str(string) or 'e' in str(string).lower():
-            return float(string)
-        else:
-            return int(string)
+        return float(string)
     except (ValueError, TypeError):
         return np.nan
 
 
 def NameOfWave(wave):
-    """Igor NameOfWave function equivalent"""
-    return wave.name
+    """
+    Get name of wave (matching Igor Pro NameOfWave)
 
+    Parameters:
+    wave : Wave - Input wave
 
-def Note(wave, note_text=None):
-    """Igor Note function equivalent"""
-    if note_text is None:
-        return wave.note
+    Returns:
+    str - Wave name
+    """
+    if isinstance(wave, Wave):
+        return wave.name
     else:
-        wave.note = str(note_text)
-        return wave.note
+        return ""
 
 
-# Igor Pro constants
-NT_FP32 = 2
-NT_FP64 = 4
-NT_I8 = 8
-NT_I16 = 16
-NT_I32 = 32
-NT_CMPLX = 1
-
-
+# Testing function for Igor compatibility
 def Testing(string_input, number_input):
-    """Testing function for igor_compatibility module"""
+    """Testing function for Igor compatibility module"""
     print(f"Igor compatibility testing: {string_input}, {number_input}")
-    return len(string_input) + number_input
+    return f"Igor result: {string_input} + {number_input}"
+
+
+# Additional utility functions for numerical operations
+
+def Limit(value, min_val, max_val):
+    """
+    Limit value to range (matching Igor Pro limit function)
+
+    Parameters:
+    value : float - Input value
+    min_val : float - Minimum allowed value
+    max_val : float - Maximum allowed value
+
+    Returns:
+    float - Limited value
+    """
+    return max(min_val, min(value, max_val))
+
+
+def SelectNumber(condition, true_value, false_value):
+    """
+    Select number based on condition (matching Igor Pro SelectNumber)
+
+    Parameters:
+    condition : bool - Condition to test
+    true_value : float - Value if condition is true
+    false_value : float - Value if condition is false
+
+    Returns:
+    float - Selected value
+    """
+    return true_value if condition else false_value
+
+
+def Round(value):
+    """
+    Round to nearest integer (matching Igor Pro Round)
+
+    Parameters:
+    value : float - Input value
+
+    Returns:
+    int - Rounded value
+    """
+    return int(np.round(value))
+
+
+def Floor(value):
+    """
+    Floor function (matching Igor Pro Floor)
+
+    Parameters:
+    value : float - Input value
+
+    Returns:
+    int - Floor value
+    """
+    return int(np.floor(value))
+
+
+def Ceil(value):
+    """
+    Ceiling function (matching Igor Pro Ceil)
+
+    Parameters:
+    value : float - Input value
+
+    Returns:
+    int - Ceiling value
+    """
+    return int(np.ceil(value))
+
+
+def Abs(value):
+    """
+    Absolute value (matching Igor Pro Abs)
+
+    Parameters:
+    value : float - Input value
+
+    Returns:
+    float - Absolute value
+    """
+    return abs(value)
+
+
+def Sign(value):
+    """
+    Sign function (matching Igor Pro Sign)
+
+    Parameters:
+    value : float - Input value
+
+    Returns:
+    int - Sign (-1, 0, or 1)
+    """
+    return np.sign(value)

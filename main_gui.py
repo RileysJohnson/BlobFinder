@@ -2,7 +2,7 @@
 """
 Hessian Blob Particle Detection Suite - Main GUI
 Complete 1-1 port from Igor Pro implementation
-FIXED: Blob overlay display working properly
+COMPLETE FIX: Proper buttons, blob regions, preprocessing, view particles
 
 Copyright 2019 by The Curators of the University of Missouri (original Igor Pro code)
 Python port maintains 1-1 functionality with Igor Pro version
@@ -51,6 +51,9 @@ class HessianBlobGUI:
         self.ax = None
         self.show_blobs = False
 
+        # FIXED: Initialize color table variable
+        self.color_table_var = None
+
         self.setup_ui()
         self.setup_menu()
 
@@ -67,111 +70,122 @@ class HessianBlobGUI:
         self.log_message("3. Use interactive threshold to select blob strength")
         self.log_message("4. Toggle 'Show Blobs' to view detected particles")
         self.log_message("")
+        self.log_message("Ready for analysis...")
 
     def setup_ui(self):
-        """Setup the main user interface - SIMPLIFIED LAYOUT"""
-        # Create main paned window
-        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        """Setup the main user interface - FIXED: Enhanced layout"""
+        # Create main frame
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Left panel for controls and file list
-        left_frame = ttk.Frame(main_paned, width=350)
-        main_paned.add(left_frame, weight=0)
+        # Left panel for controls
+        left_panel = ttk.Frame(main_frame, width=280)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        left_panel.pack_propagate(False)
 
-        # Right panel for image display
-        right_frame = ttk.Frame(main_paned)
-        main_paned.add(right_frame, weight=1)
-
-        # === LEFT PANEL ===
-
-        # File management section
-        file_frame = ttk.LabelFrame(left_frame, text="File Management", padding="10")
+        # FIXED: File management section with proper button names
+        file_frame = ttk.LabelFrame(left_panel, text="File Management", padding="5")
         file_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(file_frame, text="Load Image",
-                   command=self.load_image, width=20).pack(pady=2)
+                   command=self.load_image).pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="Load Folder",
-                   command=self.load_folder, width=20).pack(pady=2)
+                   command=self.load_folder).pack(fill=tk.X, pady=2)
 
-        # ADDED: Preprocessing section
-        preprocess_frame = ttk.LabelFrame(left_frame, text="Preprocessing", padding="10")
+        # Image list
+        list_frame = ttk.Frame(file_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+
+        self.image_listbox = tk.Listbox(list_frame, height=6)
+        self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.image_listbox.bind('<<ListboxSelect>>', self.on_image_select)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.image_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.image_listbox.config(yscrollcommand=scrollbar.set)
+
+        # FIXED: Preprocessing section (matching Igor Pro)
+        preprocess_frame = ttk.LabelFrame(left_panel, text="Preprocessing", padding="5")
         preprocess_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(preprocess_frame, text="Batch Preprocess",
-                   command=self.batch_preprocess, width=20).pack(pady=2)
+                   command=self.batch_preprocess).pack(fill=tk.X, pady=2)
         ttk.Button(preprocess_frame, text="Group Preprocess",
-                   command=self.group_preprocess, width=20).pack(pady=2)
+                   command=self.group_preprocess).pack(fill=tk.X, pady=2)
 
-        # Loaded images list
-        list_frame = ttk.LabelFrame(left_frame, text="Loaded Images", padding="10")
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-
-        # Create listbox with scrollbar - FIXED: Made shorter
-        listbox_frame = ttk.Frame(list_frame)
-        listbox_frame.pack(fill=tk.BOTH, expand=True)
-
-        self.images_listbox = tk.Listbox(listbox_frame, selectmode=tk.SINGLE, height=8)
-        scrollbar = ttk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.images_listbox.yview)
-        self.images_listbox.configure(yscrollcommand=scrollbar.set)
-
-        self.images_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # FIXED: Proper event binding
-        self.images_listbox.bind('<<ListboxSelect>>', self.on_image_select)
-
-        # Analysis controls section
-        analysis_frame = ttk.LabelFrame(left_frame, text="Analysis Controls", padding="10")
+        # Analysis controls
+        analysis_frame = ttk.LabelFrame(left_panel, text="Analysis", padding="5")
         analysis_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(analysis_frame, text="Run Blob Detection",
-                   command=self.run_single_analysis, width=20).pack(pady=2)
-        ttk.Button(analysis_frame, text="Batch Analyze All",
-                   command=self.run_batch_analysis, width=20).pack(pady=2)
-        ttk.Button(analysis_frame, text="View Particles",
-                   command=self.view_particles, width=20).pack(pady=2)
+        ttk.Button(analysis_frame, text="Run Single Analysis",
+                   command=self.run_single_analysis).pack(fill=tk.X, pady=2)
+        ttk.Button(analysis_frame, text="Run Batch Analysis",
+                   command=self.run_batch_analysis).pack(fill=tk.X, pady=2)
 
-        # Results section
-        results_frame = ttk.LabelFrame(left_frame, text="Results", padding="10")
-        results_frame.pack(fill=tk.X, pady=(0, 10))
+        # Display controls
+        display_frame = ttk.LabelFrame(left_panel, text="Display", padding="5")
+        display_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(results_frame, text="Show Statistics",
-                   command=self.show_statistics, width=20).pack(pady=2)
-        ttk.Button(results_frame, text="Export Results",
-                   command=self.export_results, width=20).pack(pady=2)
-
-        # === RIGHT PANEL ===
-
-        # Image display area with blob toggle
-        image_container = ttk.Frame(right_frame)
-        image_container.pack(fill=tk.BOTH, expand=True)
-
-        # FIXED: Blob toggle in top right corner of image area
-        toggle_frame = ttk.Frame(image_container)
-        toggle_frame.pack(fill=tk.X, padx=5, pady=2)
-
-        ttk.Label(toggle_frame, text="").pack(side=tk.LEFT, expand=True)  # Spacer
+        # FIXED: Add color table selection like Igor Pro
+        ttk.Label(display_frame, text="Color Table:").pack(anchor=tk.W)
+        self.color_table_var = tk.StringVar(value="gray")
+        color_combo = ttk.Combobox(display_frame, textvariable=self.color_table_var,
+                                   values=["gray", "rainbow", "hot", "cool", "viridis", "plasma"],
+                                   width=18, state="readonly")
+        color_combo.pack(anchor=tk.W, pady=(2, 5))
+        color_combo.bind('<<ComboboxSelected>>', lambda e: self.display_image())
 
         self.blob_toggle_var = tk.BooleanVar()
-        self.blob_toggle = ttk.Checkbutton(toggle_frame,
-                                           text="Show Detected Blobs",
+        self.blob_toggle = ttk.Checkbutton(display_frame, text="Show Blob Regions",
                                            variable=self.blob_toggle_var,
                                            command=self.toggle_blob_display,
                                            state=tk.DISABLED)
-        self.blob_toggle.pack(side=tk.RIGHT)
+        self.blob_toggle.pack(anchor=tk.W, pady=2)
 
-        # Create matplotlib figure - FIXED: Single persistent figure
-        self.figure = Figure(figsize=(8, 6), dpi=100)
-        self.ax = self.figure.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.figure, image_container)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # FIXED: View particles button (matching Igor Pro)
+        ttk.Button(display_frame, text="View Particles",
+                   command=self.view_particles).pack(fill=tk.X, pady=2)
 
-        # Log section at bottom
-        log_frame = ttk.LabelFrame(right_frame, text="Log", padding="5")
-        log_frame.pack(fill=tk.X, pady=(5, 0))
+        # Results info
+        info_frame = ttk.LabelFrame(left_panel, text="Results Info", padding="5")
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.info_text = tk.Text(info_frame, height=8, width=30, wrap=tk.WORD)
+        info_scrollbar = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=self.info_text.yview)
+        self.info_text.config(yscrollcommand=info_scrollbar.set)
+        self.info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        info_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Right panel for image display
+        right_panel = ttk.Frame(main_frame)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Image display area
+        self.setup_matplotlib_canvas(right_panel)
+
+        # Bottom panel for log messages
+        bottom_panel = ttk.Frame(self.root)
+        bottom_panel.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        log_frame = ttk.LabelFrame(bottom_panel, text="Log Messages", padding="5")
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=6, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
+    def setup_matplotlib_canvas(self, parent):
+        """Setup matplotlib canvas for image display"""
+        self.figure = Figure(figsize=(8, 6), dpi=100)
+        self.ax = self.figure.add_subplot(111)
+
+        self.canvas = FigureCanvasTkAgg(self.figure, parent)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Initial empty plot
+        self.ax.set_title("Load an image to begin analysis")
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        self.canvas.draw()
 
     def setup_menu(self):
         """Setup the menu bar"""
@@ -191,16 +205,18 @@ class HessianBlobGUI:
         # Analysis menu
         analysis_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Analysis", menu=analysis_menu)
-        analysis_menu.add_command(label="Run Blob Detection", command=self.run_single_analysis)
-        analysis_menu.add_command(label="Batch Process All", command=self.run_batch_analysis)
+        analysis_menu.add_command(label="Hessian Blob Detection", command=self.run_single_analysis)
+        analysis_menu.add_command(label="Batch Analysis", command=self.run_batch_analysis)
         analysis_menu.add_separator()
-        analysis_menu.add_command(label="Preprocessing", command=self.run_preprocessing)
+        analysis_menu.add_command(label="Batch Preprocess", command=self.batch_preprocess)
+        analysis_menu.add_command(label="Group Preprocess", command=self.group_preprocess)
 
         # View menu
         view_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(label="Toggle Blob Display", command=self.toggle_blob_display)
         view_menu.add_command(label="View Particles", command=self.view_particles)
-        view_menu.add_command(label="Show Statistics", command=self.show_statistics)
+        view_menu.add_command(label="Zoom Fit", command=self.zoom_fit)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -209,11 +225,91 @@ class HessianBlobGUI:
 
     def log_message(self, message):
         """Add a message to the log"""
-        self.log_text.insert(tk.END, message + "\n")
+        self.log_text.insert(tk.END, message + '\n')
         self.log_text.see(tk.END)
         self.root.update_idletasks()
 
-    # ADDED: Preprocessing methods
+    def load_image(self):
+        """FIXED: Load single or multiple image files (renamed from load_single_image)"""
+        filetypes = [
+            ("All supported", "*.ibw *.tif *.tiff *.png *.jpg *.jpeg *.bmp"),
+            ("Igor Binary Wave", "*.ibw"),
+            ("TIFF files", "*.tif *.tiff"),
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg *.jpeg"),
+            ("BMP files", "*.bmp"),
+            ("All files", "*.*")
+        ]
+
+        filenames = filedialog.askopenfilenames(  # Changed to allow multiple selection
+            title="Select Image File(s)",
+            filetypes=filetypes
+        )
+
+        if filenames:
+            loaded_count = 0
+            for filename in filenames:
+                try:
+                    wave = LoadWave(filename)
+                    if wave is not None:
+                        base_name = os.path.basename(filename)
+                        self.current_images[base_name] = wave
+                        loaded_count += 1
+                        self.log_message(f"Loaded image: {base_name}")
+                    else:
+                        messagebox.showerror("Error", f"Failed to load image: {filename}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Error loading image: {str(e)}")
+                    self.log_message(f"Error loading {filename}: {str(e)}")
+
+            if loaded_count > 0:
+                self.update_image_list()
+                # Select the first loaded image
+                self.image_listbox.selection_set(0)
+                self.on_image_select(None)
+                self.log_message(f"Loaded {loaded_count} image(s)")
+
+    def load_folder(self):
+        """FIXED: Load all images from a selected folder"""
+        folder_path = filedialog.askdirectory(title="Select Folder Containing Images")
+
+        if folder_path:
+            # Supported image extensions
+            extensions = ['.ibw', '.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp']
+
+            image_files = []
+            # FIXED: Only search once per extension to avoid duplicates
+            for ext in extensions:
+                image_files.extend(Path(folder_path).glob(f"*{ext}"))
+
+            if not image_files:
+                messagebox.showinfo("No Images", "No supported image files found in the selected folder.")
+                return
+
+            loaded_count = 0
+            for file_path in image_files:
+                try:
+                    wave = LoadWave(str(file_path))
+                    if wave is not None:
+                        base_name = file_path.name
+                        self.current_images[base_name] = wave
+                        loaded_count += 1
+                        self.log_message(f"Loaded image: {base_name}")
+                    else:
+                        self.log_message(f"Failed to load: {file_path.name}")
+                except Exception as e:
+                    self.log_message(f"Error loading {file_path.name}: {str(e)}")
+
+            if loaded_count > 0:
+                self.update_image_list()
+                # Select the first loaded image
+                self.image_listbox.selection_set(0)
+                self.on_image_select(None)
+                self.log_message(f"Loaded {loaded_count} images from folder")
+            else:
+                messagebox.showerror("Error", "No images could be loaded from the folder.")
+
+    # FIXED: Preprocessing methods (matching Igor Pro)
     def batch_preprocess(self):
         """Run batch preprocessing on multiple images"""
         try:
@@ -230,7 +326,6 @@ class HessianBlobGUI:
             return
 
         try:
-            from preprocessing import GroupPreprocess
             GroupPreprocess(self.current_images)
             self.log_message("Group preprocessing completed.")
             # Refresh display if current image was processed
@@ -240,141 +335,56 @@ class HessianBlobGUI:
             self.log_message(f"Error in group preprocessing: {str(e)}")
             messagebox.showerror("Error", f"Error in group preprocessing: {str(e)}")
 
-    def load_image(self):
-        """Load a single image file"""
-        file_types = [
-            ("All Supported", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.ibw"),
-            ("TIFF files", "*.tif *.tiff"),
-            ("PNG files", "*.png"),
-            ("JPEG files", "*.jpg *.jpeg"),
-            ("Igor Binary Wave", "*.ibw"),
-            ("All files", "*.*")
-        ]
-
-        filename = filedialog.askopenfilename(
-            title="Select Image File",
-            filetypes=file_types
-        )
-
-        if filename:
-            try:
-                wave = LoadWave(filename)
-                if wave is not None:
-                    self.current_images[wave.name] = wave
-                    self.update_image_list()
-                    self.log_message(f"Loaded image: {wave.name}")
-                    # Auto-select the newly loaded image
-                    self.select_image_by_name(wave.name)
-                else:
-                    self.log_message(f"Failed to load: {filename}")
-            except Exception as e:
-                self.log_message(f"Error loading {filename}: {str(e)}")
-                messagebox.showerror("Error", f"Failed to load image: {str(e)}")
-
-    def load_folder(self):
-        """Load all images from a folder"""
-        folder_path = filedialog.askdirectory(title="Select Folder with Images")
-
-        if folder_path:
-            supported_extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.ibw']
-            loaded_count = 0
-
-            try:
-                for file_path in Path(folder_path).iterdir():
-                    if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
-                        try:
-                            wave = LoadWave(str(file_path))
-                            if wave is not None:
-                                self.current_images[wave.name] = wave
-                                loaded_count += 1
-                                self.log_message(f"Loaded: {wave.name}")
-                        except Exception as e:
-                            self.log_message(f"Error loading {file_path.name}: {str(e)}")
-
-                self.update_image_list()
-                self.log_message(f"Loaded {loaded_count} images from folder")
-
-                if loaded_count > 0:
-                    # Auto-select first image
-                    first_name = list(self.current_images.keys())[0]
-                    self.select_image_by_name(first_name)
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load folder: {str(e)}")
-
     def update_image_list(self):
-        """Update the images listbox"""
-        self.images_listbox.delete(0, tk.END)
-        for name in sorted(self.current_images.keys()):
-            self.images_listbox.insert(tk.END, name)
-
-    def select_image_by_name(self, image_name):
-        """Select an image by name in the listbox"""
-        try:
-            items = list(self.images_listbox.get(0, tk.END))
-            if image_name in items:
-                index = items.index(image_name)
-                self.images_listbox.selection_clear(0, tk.END)
-                self.images_listbox.selection_set(index)
-                self.images_listbox.see(index)
-                self.on_image_select(None)  # Trigger the selection event
-        except Exception as e:
-            self.log_message(f"Error selecting image {image_name}: {str(e)}")
+        """Update the image list display"""
+        self.image_listbox.delete(0, tk.END)
+        for name in self.current_images.keys():
+            self.image_listbox.insert(tk.END, name)
 
     def on_image_select(self, event):
-        """Handle image selection from listbox - FIXED"""
-        try:
-            selection = self.images_listbox.curselection()
-            if selection:
-                index = selection[0]
-                image_name = self.images_listbox.get(index)
-                if image_name in self.current_images:
-                    self.current_display_image = self.current_images[image_name]
-                    self.current_display_results = self.current_results.get(image_name, None)
-                    self.display_image()
-                    self.log_message(f"Selected image: {image_name}")
+        """Handle image selection from list"""
+        selection = self.image_listbox.curselection()
+        if selection:
+            index = selection[0]
+            image_name = self.image_listbox.get(index)
 
-                    # Enable/disable blob toggle based on whether results exist
-                    if self.current_display_results is not None:
-                        self.blob_toggle.configure(state=tk.NORMAL)
-                    else:
-                        self.blob_toggle.configure(state=tk.DISABLED)
-                        self.blob_toggle_var.set(False)
-                        self.show_blobs = False
-        except Exception as e:
-            self.log_message(f"Error in image selection: {str(e)}")
+            if image_name in self.current_images:
+                self.current_display_image = self.current_images[image_name]
+                self.current_display_results = self.current_results.get(image_name, None)
+                self.display_image()
+                self.update_info_display()
+
+                # Enable blob toggle if results exist
+                if self.current_display_results:
+                    self.blob_toggle.configure(state=tk.NORMAL)
+                else:
+                    self.blob_toggle.configure(state=tk.DISABLED)
+                    self.show_blobs = False
+                    self.blob_toggle_var.set(False)
 
     def display_image(self):
-        """Display the current image - FIXED: Proper matplotlib handling"""
+        """Display the currently selected image"""
         if self.current_display_image is None:
             return
 
         try:
-            # Clear the axes
             self.ax.clear()
 
-            # Get image dimensions and scaling
-            height, width = self.current_display_image.data.shape
-            x_min = DimOffset(self.current_display_image, 1)
-            x_max = x_min + width * DimDelta(self.current_display_image, 1)
-            y_min = DimOffset(self.current_display_image, 0)
-            y_max = y_min + height * DimDelta(self.current_display_image, 0)
+            # FIXED: Use selected color table
+            colormap = self.color_table_var.get()
 
-            # Display image with proper scaling
-            im = self.ax.imshow(self.current_display_image.data,
-                                extent=[x_min, x_max, y_max, y_min],
-                                cmap='gray', aspect='equal', origin='upper')
+            # Display the image
+            self.ax.imshow(self.current_display_image.data, cmap=colormap, aspect='equal')
+            self.ax.set_title(f"{self.current_display_image.name}")
 
-            # FIXED: Show blobs if toggle is enabled and results exist
-            if self.show_blobs and self.current_display_results is not None:
+            # FIXED: Add blob overlay if requested and available
+            if self.show_blobs and self.current_display_results:
                 self.add_blob_overlay()
 
-            # Set labels and title
-            self.ax.set_xlabel(f"X ({DimUnits(self.current_display_image, 1)})")
-            self.ax.set_ylabel(f"Y ({DimUnits(self.current_display_image, 0)})")
-            self.ax.set_title(self.current_display_image.name)
+            # Remove ticks for cleaner display
+            self.ax.set_xticks([])
+            self.ax.set_yticks([])
 
-            # Update the canvas
             self.figure.tight_layout()
             self.canvas.draw()
 
@@ -382,7 +392,7 @@ class HessianBlobGUI:
             self.log_message(f"Error displaying image: {str(e)}")
 
     def add_blob_overlay(self):
-        """Add red circle overlay for detected blobs - FIXED"""
+        """FIXED: Add blob regions with red tinting like Igor Pro"""
         try:
             if (self.current_display_results is None or
                     'info' not in self.current_display_results or
@@ -393,30 +403,77 @@ class HessianBlobGUI:
             if info_wave.data.shape[0] == 0:
                 return
 
-            # Draw red circles for each detected blob
+            # Create mask for all blob regions
+            blob_mask = np.zeros(self.current_display_image.data.shape, dtype=bool)
+
+            # Draw each blob region
             blob_count = 0
             for i in range(info_wave.data.shape[0]):
                 x_coord = info_wave.data[i, 0]
                 y_coord = info_wave.data[i, 1]
                 radius = info_wave.data[i, 2]
 
-                # Create red circle overlay (matches Igor Pro)
+                # Create circular mask for this blob
+                y_coords, x_coords = np.ogrid[:self.current_display_image.data.shape[0],
+                                     :self.current_display_image.data.shape[1]]
+                distance = np.sqrt((x_coords - x_coord) ** 2 + (y_coords - y_coord) ** 2)
+                blob_region = distance <= radius
+
+                blob_mask |= blob_region
+
+                # Draw perimeter circle (green like Igor Pro)
                 circle = Circle((x_coord, y_coord), radius,
-                                fill=False, edgecolor='red', linewidth=2, alpha=0.8)
+                                fill=False, edgecolor='lime', linewidth=2, alpha=0.8)
                 self.ax.add_patch(circle)
                 blob_count += 1
 
-            self.log_message(f"Displaying {blob_count} detected blobs")
+            # Create red tinted overlay for blob regions
+            red_overlay = np.zeros((*self.current_display_image.data.shape, 4))
+            red_overlay[blob_mask] = [1, 0, 0, 0.3]  # Red with transparency
+
+            # Apply the overlay
+            self.ax.imshow(red_overlay, aspect='equal', alpha=0.5)
+
+            self.log_message(f"Displaying {blob_count} detected blobs with region overlay")
 
         except Exception as e:
             self.log_message(f"Error adding blob overlay: {str(e)}")
 
     def toggle_blob_display(self):
-        """Toggle blob overlay display - FIXED"""
+        """FIXED: Toggle blob overlay display"""
         self.show_blobs = self.blob_toggle_var.get()
         self.log_message(f"Blob display: {'ON' if self.show_blobs else 'OFF'}")
         if self.current_display_image is not None:
             self.display_image()
+
+    def update_info_display(self):
+        """Update the results info display"""
+        self.info_text.delete(1.0, tk.END)
+
+        def format_scientific(value):
+            """Format like Igor Pro - scientific notation for very small/large numbers"""
+            if abs(value) < 1e-3 or abs(value) > 1e6:
+                return f"{value:.3e}"
+            else:
+                return f"{value:.6f}"
+
+        if self.current_display_image:
+            info = f"Image: {self.current_display_image.name}\n"
+            info += f"Size: {self.current_display_image.data.shape}\n"
+            info += f"Data type: {self.current_display_image.data.dtype}\n"
+            info += f"Range: [{format_scientific(np.min(self.current_display_image.data))}, {format_scientific(np.max(self.current_display_image.data))}]\n\n"
+
+            if self.current_display_results:
+                info += f"Analysis Results:\n"
+                info += f"Particles found: {self.current_display_results['num_particles']}\n"
+                info += f"Threshold used: {format_scientific(self.current_display_results['threshold'])}\n"
+
+                if self.current_display_results['num_particles'] > 0:
+                    sizes = self.current_display_results['info'].data[:, 2]  # Radii
+                    info += f"Size range: [{format_scientific(np.min(sizes))}, {format_scientific(np.max(sizes))}]\n"
+                    info += f"Mean size: {format_scientific(np.mean(sizes))}\n"
+
+            self.info_text.insert(1.0, info)
 
     def run_single_analysis(self):
         """Run blob detection on selected image - FIXED: Proper parameter passing"""
@@ -441,112 +498,77 @@ class HessianBlobGUI:
                 self.log_message(f"Detection complete. Found {results['num_particles']} particles.")
 
                 # Update display
+                self.update_info_display()
                 self.display_image()
 
             else:
                 self.log_message("Detection cancelled or failed.")
 
         except Exception as e:
-            self.log_message(f"Error in blob detection: {str(e)}")
-            messagebox.showerror("Error", f"Error in blob detection: {str(e)}")
+            self.log_message(f"Error in analysis: {str(e)}")
+            messagebox.showerror("Analysis Error", f"An error occurred during analysis: {str(e)}")
 
     def run_batch_analysis(self):
-        """Run blob detection on all loaded images"""
+        """Run batch analysis on all loaded images"""
         if not self.current_images:
-            messagebox.showwarning("No Images", "Please load images first.")
-            return
-
-        if not messagebox.askyesno("Batch Analysis",
-                                   f"Run blob detection on all {len(self.current_images)} images?"):
+            messagebox.showwarning("No Images", "Please load some images first.")
             return
 
         try:
-            # Get parameters once for all images
-            params = GetBlobDetectionParams()
-            if params is None:
-                return  # User cancelled
+            self.log_message("Starting batch analysis...")
 
-            processed = 0
-            for image_name, wave in self.current_images.items():
-                self.log_message(f"Processing {image_name}...")
-                self.root.update_idletasks()
+            # Run batch analysis
+            batch_results = BatchHessianBlobs(self.current_images)
 
-                results = FindHessianBlobs(wave, params)
-                if results:
-                    self.current_results[image_name] = results
-                    processed += 1
-                    self.log_message(f"  Found {results['num_particles']} particles")
+            if batch_results:
+                # Store all results
+                self.current_results.update(batch_results)
 
-            self.log_message(f"Batch analysis complete. Processed {processed} images.")
+                # Update display if current image has results
+                if (self.current_display_image and
+                        self.current_display_image.name in batch_results):
+                    self.current_display_results = batch_results[self.current_display_image.name]
+                    self.blob_toggle.configure(state=tk.NORMAL)
+                    self.update_info_display()
+                    self.display_image()
 
-            # Update display if current image was processed
-            if (self.current_display_image and
-                    self.current_display_image.name in self.current_results):
-                self.current_display_results = self.current_results[self.current_display_image.name]
-                self.blob_toggle.configure(state=tk.NORMAL)
-                self.display_image()
+                self.log_message(f"Batch analysis complete. Processed {len(batch_results)} images.")
+            else:
+                self.log_message("Batch analysis failed or was cancelled.")
 
         except Exception as e:
             self.log_message(f"Error in batch analysis: {str(e)}")
-            messagebox.showerror("Error", f"Error in batch analysis: {str(e)}")
+            messagebox.showerror("Batch Analysis Error", f"An error occurred: {str(e)}")
 
+    # FIXED: View particles function (matching Igor Pro)
     def view_particles(self):
-        """Open particle viewer window"""
+        """Launch particle viewer (matching Igor Pro ViewParticles)"""
         if self.current_display_image is None:
             messagebox.showwarning("No Image", "Please select an image first.")
             return
 
-        if (self.current_display_results is None or
-                'info' not in self.current_display_results):
+        if self.current_display_results is None:
             messagebox.showwarning("No Results", "Please run blob detection first.")
             return
 
         try:
+            # Launch particle viewer
             ViewParticles(self.current_display_image,
                           self.current_display_results['info'])
+            self.log_message("Particle viewer opened.")
         except Exception as e:
             self.log_message(f"Error opening particle viewer: {str(e)}")
-            messagebox.showerror("Error", f"Error opening particle viewer: {str(e)}")
+            messagebox.showerror("Viewer Error", f"Error opening particle viewer: {str(e)}")
 
-    def run_preprocessing(self):
-        """Run preprocessing on selected image"""
-        if self.current_display_image is None:
-            messagebox.showwarning("No Image", "Please select an image first.")
-            return
-
-        try:
-            BatchPreprocess()
-        except Exception as e:
-            self.log_message(f"Error in preprocessing: {str(e)}")
-
-    def show_statistics(self):
-        """Show image statistics"""
-        if self.current_display_image is None:
-            messagebox.showwarning("No Image", "Please select an image first.")
-            return
-
-        stats = ImageStats(self.current_display_image, quiet=False)
-
-        stats_window = tk.Toplevel(self.root)
-        stats_window.title("Image Statistics")
-        stats_window.geometry("500x400")
-
-        text_widget = scrolledtext.ScrolledText(stats_window, wrap=tk.WORD)
-        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        text_widget.insert(tk.END, f"Statistics for {self.current_display_image.name}\n")
-        text_widget.insert(tk.END, "=" * 40 + "\n\n")
-        text_widget.insert(tk.END, f"Minimum: {stats['min']:.6f}\n")
-        text_widget.insert(tk.END, f"Maximum: {stats['max']:.6f}\n")
-        text_widget.insert(tk.END, f"Mean: {stats['mean']:.6f}\n")
-        text_widget.insert(tk.END, f"Standard Deviation: {stats['std']:.6f}\n")
-        text_widget.insert(tk.END, f"Sum: {stats['sum']:.6f}\n")
-        text_widget.insert(tk.END, f"Number of Points: {stats['numPoints']}\n")
-        text_widget.insert(tk.END, f"Min Location: {stats['minLoc']}\n")
-        text_widget.insert(tk.END, f"Max Location: {stats['maxLoc']}\n")
+    def zoom_fit(self):
+        """Fit image to display area"""
+        if self.current_display_image is not None:
+            self.ax.set_xlim(0, self.current_display_image.data.shape[1])
+            self.ax.set_ylim(self.current_display_image.data.shape[0], 0)
+            self.canvas.draw()
 
     def export_results(self):
-        """Export analysis results"""
+        """Export analysis results to file"""
         if not self.current_results:
             messagebox.showwarning("No Results", "No analysis results to export.")
             return
