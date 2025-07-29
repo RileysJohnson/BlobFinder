@@ -23,11 +23,114 @@ if not hasattr(np, 'complex'):
     np.complex = complex
 
 
+def ViewParticleData(info, image_name):
+    """
+    View particle data in a table format
+    Simple data viewer for the particle information
+
+    Parameters:
+    info : Wave - Particle information array
+    image_name : str - Name of the source image
+    """
+    if info is None or info.data.shape[0] == 0:
+        messagebox.showinfo("No Data", "No particle data to display.")
+        return
+
+    # Create data viewer window
+    data_window = tk.Toplevel()
+    data_window.title(f"Particle Data - {image_name}")
+    data_window.geometry("800x500")
+
+    # Main frame
+    main_frame = ttk.Frame(data_window, padding="10")
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    # Title
+    title_label = ttk.Label(main_frame, text=f"Particle Data: {image_name}",
+                           font=('TkDefaultFont', 12, 'bold'))
+    title_label.pack(pady=(0, 10))
+
+    # Info label
+    info_label = ttk.Label(main_frame, text=f"Total particles: {info.data.shape[0]}")
+    info_label.pack(pady=(0, 10))
+
+    # Create Treeview for data display
+    tree_frame = ttk.Frame(main_frame)
+    tree_frame.pack(fill=tk.BOTH, expand=True)
+
+    # Define columns
+    columns = ['#', 'X', 'Y', 'Radius', 'Response', 'Scale']
+    tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=15)
+
+    # Configure column headings
+    tree.heading('#', text='Particle #')
+    tree.heading('X', text='X Position')
+    tree.heading('Y', text='Y Position')
+    tree.heading('Radius', text='Radius')
+    tree.heading('Response', text='Response')
+    tree.heading('Scale', text='Scale')
+
+    # Configure column widths
+    tree.column('#', width=80)
+    tree.column('X', width=100)
+    tree.column('Y', width=100)
+    tree.column('Radius', width=100)
+    tree.column('Response', width=120)
+    tree.column('Scale', width=100)
+
+    # Add scrollbars
+    v_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+    h_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
+    tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+    # Pack treeview and scrollbars
+    tree.grid(row=0, column=0, sticky='nsew')
+    v_scrollbar.grid(row=0, column=1, sticky='ns')
+    h_scrollbar.grid(row=1, column=0, sticky='ew')
+
+    tree_frame.grid_rowconfigure(0, weight=1)
+    tree_frame.grid_columnconfigure(0, weight=1)
+
+    # Populate data
+    for i in range(info.data.shape[0]):
+        particle_data = info.data[i]
+        x_pos = f"{particle_data[0]:.2f}" if len(particle_data) > 0 else "N/A"
+        y_pos = f"{particle_data[1]:.2f}" if len(particle_data) > 1 else "N/A"
+        radius = f"{particle_data[2]:.2f}" if len(particle_data) > 2 else "N/A"
+        response = f"{particle_data[3]:.6f}" if len(particle_data) > 3 else "N/A"
+        scale = f"{particle_data[4]:.2f}" if len(particle_data) > 4 else "N/A"
+
+        tree.insert('', 'end', values=(i, x_pos, y_pos, radius, response, scale))
+
+    # Button frame
+    button_frame = ttk.Frame(main_frame)
+    button_frame.pack(fill=tk.X, pady=(10, 0))
+
+    ttk.Button(button_frame, text="Close", command=data_window.destroy).pack(side=tk.RIGHT)
+
+    # Export button
+    def export_data():
+        file_path = filedialog.asksaveasfilename(
+            title="Export Particle Data",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if file_path:
+            try:
+                np.savetxt(file_path, info.data, delimiter=',',
+                          header='X,Y,Radius,Response,Scale,Extra1,Extra2,Extra3,Extra4,Extra5,Extra6,Extra7,Extra8',
+                          comments='')
+                messagebox.showinfo("Export Complete", f"Data exported to {file_path}")
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Failed to export data: {str(e)}")
+
+    ttk.Button(button_frame, text="Export CSV", command=export_data).pack(side=tk.LEFT)
+
+
 def ViewParticles(im, info, mapNum=None):
     """
     Interactive particle viewer
     Direct port from Igor Pro ViewParticles function
-    COMPLETE IMPLEMENTATION: Matching Igor Pro Figure 24 exactly
 
     Parameters:
     im : Wave - Original image
@@ -104,244 +207,168 @@ def ViewParticles(im, info, mapNum=None):
             nav_frame = ttk.Frame(right_frame)
             nav_frame.pack(pady=(0, 15))
 
-            self.prev_btn = ttk.Button(nav_frame, text="Prev",
-                                       command=self.prev_particle, width=8)
-            self.prev_btn.pack(side=tk.LEFT, padx=2)
+            self.prev_btn = ttk.Button(nav_frame, text="← Previous", command=self.prev_particle)
+            self.prev_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.next_btn = ttk.Button(nav_frame, text="Next",
-                                       command=self.next_particle, width=8)
-            self.next_btn.pack(side=tk.LEFT, padx=2)
+            self.next_btn = ttk.Button(nav_frame, text="Next →", command=self.next_particle)
+            self.next_btn.pack(side=tk.LEFT)
 
-            # Particle counter
-            self.counter_label = ttk.Label(right_frame,
-                                           text=f"{self.current_particle + 1} of {self.total_particles}")
-            self.counter_label.pack(pady=(0, 15))
+            # Particle information display - matches Igor Pro info display
+            info_frame = ttk.LabelFrame(right_frame, text="Particle Info", padding="5")
+            info_frame.pack(fill=tk.X, pady=(0, 15))
 
-            # Display options - matches Igor Pro exactly
-            options_frame = ttk.LabelFrame(right_frame, text="Display Options", padding="5")
-            options_frame.pack(fill=tk.X, pady=(0, 15))
+            self.info_text = tk.Text(info_frame, height=8, width=25, font=("Courier", 9))
+            self.info_text.pack(fill=tk.BOTH, expand=True)
 
-            # Color table
-            ttk.Label(options_frame, text="Color Table:").pack(anchor=tk.W)
-            self.color_var = tk.StringVar(value="Grays")
-            color_combo = ttk.Combobox(options_frame, textvariable=self.color_var,
-                                       values=["Grays", "Rainbow", "YellowHot", "BlueHot", "RedHot"],
+            # Control buttons - matches Igor Pro controls
+            control_frame = ttk.LabelFrame(right_frame, text="View Controls", padding="5")
+            control_frame.pack(fill=tk.X, pady=(0, 15))
+
+            # Show perimeter checkbox
+            self.show_perimeter_var = tk.BooleanVar(value=self.show_perimeter)
+            ttk.Checkbutton(control_frame, text="Show Perimeter",
+                            variable=self.show_perimeter_var,
+                            command=self.toggle_perimeter).pack(anchor=tk.W, pady=2)
+
+            # Color table selector
+            ttk.Label(control_frame, text="Color Table:").pack(anchor=tk.W, pady=(10, 2))
+            self.color_var = tk.StringVar(value=self.color_table)
+            color_combo = ttk.Combobox(control_frame, textvariable=self.color_var,
+                                       values=["Grays", "Rainbow", "Hot", "Cool"],
                                        width=15, state="readonly")
-            color_combo.pack(anchor=tk.W, pady=(2, 5))
-            color_combo.bind('<<ComboboxSelected>>', lambda e: self.update_display())
-
-            # Interpolation
-            self.interp_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(options_frame, text="Interpolate",
-                            variable=self.interp_var,
-                            command=self.update_display).pack(anchor=tk.W, pady=2)
-
-            # Show perimeter
-            self.perimeter_var = tk.BooleanVar(value=True)
-            ttk.Checkbutton(options_frame, text="Show Perimeter",
-                            variable=self.perimeter_var,
-                            command=self.update_display).pack(anchor=tk.W, pady=2)
-
-            # Particle measurements - matches Igor Pro info display
-            measurements_frame = ttk.LabelFrame(right_frame, text="Measurements", padding="5")
-            measurements_frame.pack(fill=tk.X, pady=(0, 15))
-
-            self.measurements_text = tk.Text(measurements_frame, height=12, width=25, wrap=tk.WORD)
-            measurements_scroll = ttk.Scrollbar(measurements_frame, orient=tk.VERTICAL,
-                                                command=self.measurements_text.yview)
-            self.measurements_text.config(yscrollcommand=measurements_scroll.set)
-            self.measurements_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            measurements_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            color_combo.pack(anchor=tk.W, pady=(0, 5))
+            color_combo.bind('<<ComboboxSelected>>', self.change_color_table)
 
             # Action buttons - matches Igor Pro
             action_frame = ttk.Frame(right_frame)
             action_frame.pack(fill=tk.X, pady=(0, 10))
 
             ttk.Button(action_frame, text="Delete Particle",
-                       command=self.delete_particle, width=15).pack(pady=2)
+                       command=self.delete_particle).pack(fill=tk.X, pady=2)
             ttk.Button(action_frame, text="Zoom Fit",
-                       command=self.zoom_fit, width=15).pack(pady=2)
+                       command=self.zoom_fit).pack(fill=tk.X, pady=2)
             ttk.Button(action_frame, text="Close",
-                       command=self.root.destroy, width=15).pack(pady=2)
+                       command=self.root.destroy).pack(fill=tk.X, pady=2)
 
-            # Keyboard bindings - matches Igor Pro shortcuts
+            # Bind keyboard shortcuts - matches Igor Pro behavior
             self.root.bind('<Left>', lambda e: self.prev_particle())
             self.root.bind('<Right>', lambda e: self.next_particle())
             self.root.bind('<space>', lambda e: self.delete_particle())
             self.root.focus_set()
 
         def update_display(self):
-            """Update particle display - matches Igor Pro display exactly"""
-            if self.current_particle >= self.total_particles:
+            """Update the particle display"""
+            if self.total_particles == 0:
                 return
 
+            # Get current particle info
+            particle_data = self.info.data[self.current_particle]
+            x_coord = particle_data[0]
+            y_coord = particle_data[1]
+            radius = particle_data[2]
+
+            # Update particle label
+            self.particle_label.config(text=f"Particle {self.current_particle}")
+
+            # Clear and update plot
             self.ax.clear()
 
-            # Get current particle info
-            x_coord = self.info.data[self.current_particle, 0]
-            y_coord = self.info.data[self.current_particle, 1]
-            radius = self.info.data[self.current_particle, 2]
+            # Calculate crop region around particle (matching Igor Pro ViewParticles)
+            crop_size = max(50, int(radius * 4))  # Minimum 50 pixels, or 4x radius
+            x_min = max(0, int(x_coord - crop_size))
+            x_max = min(self.im.data.shape[1], int(x_coord + crop_size))
+            y_min = max(0, int(y_coord - crop_size))
+            y_max = min(self.im.data.shape[0], int(y_coord + crop_size))
 
-            # Create zoomed view around particle - matches Igor Pro zoom level
-            zoom_factor = 4.0  # Igor Pro default zoom
-            crop_size = max(radius * zoom_factor, 20)  # Minimum crop size
+            # Crop image
+            cropped_image = self.im.data[y_min:y_max, x_min:x_max]
 
-            # Calculate crop region in image coordinates
-            dx = DimDelta(self.im, 1) if hasattr(self.im, 'GetScale') else 1.0
-            dy = DimDelta(self.im, 0) if hasattr(self.im, 'GetScale') else 1.0
-            x_offset = DimOffset(self.im, 1) if hasattr(self.im, 'GetScale') else 0.0
-            y_offset = DimOffset(self.im, 0) if hasattr(self.im, 'GetScale') else 0.0
+            # Display cropped image
+            extent = [x_min, x_max, y_max, y_min]  # Note: y is flipped for imshow
 
-            # Convert to pixel coordinates for cropping
-            x_min_px = max(0, int(x_coord - crop_size))
-            x_max_px = min(self.im.data.shape[1], int(x_coord + crop_size))
-            y_min_px = max(0, int(y_coord - crop_size))
-            y_max_px = min(self.im.data.shape[0], int(y_coord + crop_size))
+            color_map = self.color_var.get().lower()
+            if color_map == "grays":
+                color_map = "gray"
+            elif color_map == "rainbow":
+                color_map = "rainbow"
+            elif color_map == "hot":
+                color_map = "hot"
+            elif color_map == "cool":
+                color_map = "cool"
 
-            # Extract cropped data
-            crop_data = self.im.data[y_min_px:y_max_px, x_min_px:x_max_px]
+            self.ax.imshow(cropped_image, cmap=color_map, extent=extent, aspect='equal')
 
-            # Calculate display extents
-            extent = [x_min_px, x_max_px, y_max_px, y_min_px]
-
-            # Display image with proper colormap
-            interpolation = 'bilinear' if self.interp_var.get() else 'nearest'
-            cmap = self.get_colormap()
-
-            im_display = self.ax.imshow(crop_data, extent=extent, cmap=cmap,
-                                        aspect='equal', origin='upper',
-                                        interpolation=interpolation)
-
-            # FIXED: Add real perimeter outline like Igor Pro instead of circles
-            if self.perimeter_var.get():
-                self.draw_real_blob_outline(x_coord, y_coord, radius, extent)
-
-            # Add center marker
-            self.ax.plot(x_coord, y_coord, '+', color='red', markersize=10, markeredgewidth=2)
-
-            # Set title and limits
-            self.ax.set_title(f"Particle {self.current_particle} (x={x_coord:.1f}, y={y_coord:.1f})")
-            self.ax.set_xlim(x_min_px, x_max_px)
-            self.ax.set_ylim(y_max_px, y_min_px)
-
-            # Update labels
-            self.particle_label.config(text=f"Particle {self.current_particle}")
-            self.counter_label.config(text=f"{self.current_particle + 1} of {self.total_particles}")
-
-            # Update measurements display
-            self.update_measurements()
-
-            self.canvas.draw()
-
-        def draw_real_blob_outline(self, x_coord, y_coord, radius, extent):
-            """FIXED: Draw the real blob outline like Igor Pro, not just a circle"""
-            # Create mask for this particle based on actual blob detection
-            y_coords, x_coords = np.ogrid[:self.im.data.shape[0], :self.im.data.shape[1]]
-            distance = np.sqrt((x_coords - x_coord) ** 2 + (y_coords - y_coord) ** 2)
-
-            # Create blob mask (this approximates the real detected blob boundary)
-            blob_mask = distance <= radius
-
-            # Find the perimeter using edge detection like Igor Pro
-            from scipy import ndimage
-
-            # Get the actual blob region
-            crop_y_min = max(0, int(y_coord - radius * 2))
-            crop_y_max = min(self.im.data.shape[0], int(y_coord + radius * 2))
-            crop_x_min = max(0, int(x_coord - radius * 2))
-            crop_x_max = min(self.im.data.shape[1], int(x_coord + radius * 2))
-
-            if crop_y_max > crop_y_min and crop_x_max > crop_x_min:
-                crop_mask = blob_mask[crop_y_min:crop_y_max, crop_x_min:crop_x_max]
-
-                # Find the perimeter using morphological operations
-                eroded = ndimage.binary_erosion(crop_mask)
-                perimeter = crop_mask & ~eroded
-
-                # Get perimeter coordinates
-                perim_y, perim_x = np.where(perimeter)
-                if len(perim_y) > 0:
-                    # Convert back to full image coordinates
-                    perim_x_full = perim_x + crop_x_min
-                    perim_y_full = perim_y + crop_y_min
-
-                    # Only show perimeter points within the display extent
-                    x_min_px, x_max_px, y_max_px, y_min_px = extent
-
-                    # Plot the real perimeter outline (green like Igor Pro Figure 24)
-                    self.ax.scatter(perim_x_full, perim_y_full, c='lime', s=1, alpha=0.8)
-
-            # Fallback to circle if perimeter detection fails
-            if not hasattr(self, '_perimeter_drawn') or not self._perimeter_drawn:
+            # Show particle perimeter if enabled
+            if self.show_perimeter_var.get():
                 circle = Circle((x_coord, y_coord), radius,
-                                fill=False, edgecolor='lime', linewidth=2, alpha=0.8)
+                                fill=False, edgecolor='lime', linewidth=2)
                 self.ax.add_patch(circle)
 
-        def get_colormap(self):
-            """Get matplotlib colormap from Igor Pro style name"""
-            color_map = {
-                'Grays': 'gray',
-                'Rainbow': 'rainbow',
-                'YellowHot': 'hot',
-                'BlueHot': 'Blues',
-                'RedHot': 'Reds'
-            }
-            return color_map.get(self.color_var.get(), 'gray')
+            # Mark particle center
+            self.ax.plot(x_coord, y_coord, 'r+', markersize=10, markeredgewidth=2)
 
-        def update_measurements(self):
-            """Update measurements display - matches Igor Pro format with scientific notation"""
-            self.measurements_text.delete(1.0, tk.END)
+            self.ax.set_title(f"Particle {self.current_particle}")
+            self.canvas.draw()
 
-            def format_scientific(value):
-                """Format like Igor Pro - scientific notation for very small/large numbers"""
-                if abs(value) < 1e-3 or abs(value) > 1e6:
-                    return f"{value:.3e}"
-                else:
-                    return f"{value:.6f}"
+            # Update info text
+            self.update_info_text()
 
-            if self.info.data.shape[1] >= 13:  # Full measurement data
-                particle_data = self.info.data[self.current_particle]
+            # Update button states
+            self.prev_btn.config(state=tk.NORMAL if self.current_particle > 0 else tk.DISABLED)
+            self.next_btn.config(state=tk.NORMAL if self.current_particle < self.total_particles - 1 else tk.DISABLED)
 
-                measurements = f"""X Position: {format_scientific(particle_data[0])}
-Y Position: {format_scientific(particle_data[1])}
-Radius: {format_scientific(particle_data[2])}
-Response: {format_scientific(particle_data[3])}
-Scale: {format_scientific(particle_data[4])}
-Area: {format_scientific(particle_data[8])}
-Volume: {format_scientific(particle_data[9])}
-Height: {format_scientific(particle_data[10])}
-COM X: {format_scientific(particle_data[11])}
-COM Y: {format_scientific(particle_data[12])}
+        def update_info_text(self):
+            """Update particle information text"""
+            self.info_text.delete(1.0, tk.END)
 
-Boundary: {'Yes' if particle_data[5] > 0 else 'No'}
-"""
-            else:
-                # Basic measurements only
-                particle_data = self.info.data[self.current_particle]
-                measurements = f"""X Position: {format_scientific(particle_data[0])}
-Y Position: {format_scientific(particle_data[1])}
-Radius: {format_scientific(particle_data[2])}
-Response: {format_scientific(particle_data[3])}
-"""
+            particle_data = self.info.data[self.current_particle]
 
-            self.measurements_text.insert(1.0, measurements)
+            info_text = f"Particle {self.current_particle}\n"
+            info_text += f"X Position: {particle_data[0]:.2f}\n"
+            info_text += f"Y Position: {particle_data[1]:.2f}\n"
+            info_text += f"Radius: {particle_data[2]:.2f}\n"
+
+            if len(particle_data) > 3:
+                info_text += f"Response: {particle_data[3]:.6f}\n"
+            if len(particle_data) > 4:
+                info_text += f"Scale: {particle_data[4]:.2f}\n"
+
+            # Add additional measurements if available
+            if len(particle_data) > 8:
+                info_text += f"\nArea: {particle_data[8]:.2f}\n"
+            if len(particle_data) > 9:
+                info_text += f"Volume: {particle_data[9]:.2f}\n"
+            if len(particle_data) > 10:
+                info_text += f"Height: {particle_data[10]:.2f}\n"
+
+            self.info_text.insert(tk.END, info_text)
 
         def prev_particle(self):
-            """Go to previous particle"""
+            """Navigate to previous particle"""
             if self.current_particle > 0:
                 self.current_particle -= 1
                 self.update_display()
 
         def next_particle(self):
-            """Go to next particle"""
+            """Navigate to next particle"""
             if self.current_particle < self.total_particles - 1:
                 self.current_particle += 1
                 self.update_display()
 
+        def toggle_perimeter(self):
+            """Toggle perimeter display"""
+            self.show_perimeter = self.show_perimeter_var.get()
+            self.update_display()
+
+        def change_color_table(self, event=None):
+            """Change color table"""
+            self.color_table = self.color_var.get()
+            self.update_display()
+
         def delete_particle(self):
             """Delete current particle"""
             if self.total_particles <= 1:
-                messagebox.showinfo("Cannot Delete", "Cannot delete the last particle.")
+                messagebox.showwarning("Cannot Delete", "Cannot delete the last particle.")
                 return
 
             result = messagebox.askyesno("Delete Particle",
@@ -405,45 +432,39 @@ def MeasureParticles(im, info):
         # Calculate particle region
         y_coords, x_coords = np.ogrid[:im.data.shape[0], :im.data.shape[1]]
         distance = np.sqrt((x_coords - x_coord) ** 2 + (y_coords - y_coord) ** 2)
-        mask = distance <= radius
+        particle_mask = distance <= radius
 
-        if np.any(mask):
+        if np.any(particle_mask):
             # Extract particle region
-            region = im.data[mask]
+            particle_pixels = im.data[particle_mask]
 
             # Calculate measurements
-            area_pixels = np.sum(mask)
-            area_physical = area_pixels  # Could apply scaling factors here
+            area = np.sum(particle_mask)  # Area in pixels
+            volume = np.sum(particle_pixels)  # Sum of intensities
+            height = np.max(particle_pixels) if len(particle_pixels) > 0 else 0  # Max intensity
 
-            # Volume (sum of intensities above background)
-            background = np.mean(im.data[distance > radius * 2]) if np.any(distance > radius * 2) else 0
-            volume = np.sum(region - background)
-
-            # Height (max intensity above background)
-            height = np.max(region) - background
-
-            # Center of mass
-            if np.sum(region) > 0:
-                Y, X = np.mgrid[:im.data.shape[0], :im.data.shape[1]]
-                total_intensity = np.sum(region)
-                com_y = np.sum(Y[mask] * region) / total_intensity
-                com_x = np.sum(X[mask] * region) / total_intensity
-
-                # Convert to physical coordinates if scaling available
-                if hasattr(im, 'GetScale'):
-                    com_x_phys = DimOffset(im, 1) + com_x * DimDelta(im, 1)
-                    com_y_phys = DimOffset(im, 0) + com_y * DimDelta(im, 0)
-                else:
-                    com_x_phys = com_x
-                    com_y_phys = com_y
+            # Center of mass (intensity-weighted)
+            if volume > 0:
+                y_indices, x_indices = np.where(particle_mask)
+                intensities = im.data[particle_mask]
+                com_x = np.sum(x_indices * intensities) / volume
+                com_y = np.sum(y_indices * intensities) / volume
             else:
-                com_x_phys = x_coord
-                com_y_phys = y_coord
+                com_x = x_coord
+                com_y = y_coord
 
-            # Store measurements
-            info.data[i, 8] = area_physical  # Area
-            info.data[i, 9] = max(0, volume)  # Volume
-            info.data[i, 10] = max(0, height)  # Height
+            # Convert to physical coordinates if scale info available
+            x_scale = im.GetScale('x')
+            y_scale = im.GetScale('y')
+
+            area_phys = area * x_scale['delta'] * y_scale['delta']
+            com_x_phys = com_x * x_scale['delta'] + x_scale['offset']
+            com_y_phys = com_y * y_scale['delta'] + y_scale['offset']
+
+            # Store measurements in info array
+            info.data[i, 8] = area_phys  # Area
+            info.data[i, 9] = volume  # Volume
+            info.data[i, 10] = height  # Height
             info.data[i, 11] = com_x_phys  # Center of mass X
             info.data[i, 12] = com_y_phys  # Center of mass Y
         else:
@@ -458,221 +479,55 @@ def MeasureParticles(im, info):
     return True
 
 
-def CalculateStatistics(results_dict):
+def ExportResults(results_dict, file_path):
     """
-    Calculate statistics on particle detection results
+    Export analysis results to CSV file
 
     Parameters:
     results_dict : dict - Dictionary of analysis results
-
-    Returns:
-    dict - Statistics summary
+    file_path : str - Output file path
     """
     if not results_dict:
-        return {}
+        raise ValueError("No results to export")
 
-    all_sizes = []
-    all_responses = []
-    all_areas = []
-    all_volumes = []
-    all_heights = []
-
-    total_particles = 0
-    total_images = len(results_dict)
+    # Collect all particle data
+    all_data = []
+    image_names = []
 
     for image_name, result in results_dict.items():
         if 'info' in result and result['info'].data.shape[0] > 0:
             info_data = result['info'].data
             num_particles = info_data.shape[0]
-            total_particles += num_particles
 
-            # Collect measurements
-            all_sizes.extend(info_data[:, 2])  # Radii
-            all_responses.extend(info_data[:, 3])  # Responses
+            # Add image name column
+            for i in range(num_particles):
+                row = [image_name] + list(info_data[i])
+                all_data.append(row)
+                image_names.append(image_name)
 
-            if info_data.shape[1] >= 11:  # Has extended measurements
-                all_areas.extend(info_data[:, 8])  # Areas
-                all_volumes.extend(info_data[:, 9])  # Volumes
-                all_heights.extend(info_data[:, 10])  # Heights
+    if not all_data:
+        raise ValueError("No particle data to export")
 
-    if total_particles == 0:
-        return {
-            'total_particles': 0,
-            'total_images': total_images,
-            'particles_per_image': 0
-        }
+    # Create header
+    header = ['Image', 'X', 'Y', 'Radius', 'Response', 'Scale']
+    if len(all_data[0]) > 6:  # Has extended measurements
+        header.extend(['Extra1', 'Extra2', 'Extra3', 'Area', 'Volume', 'Height', 'COM_X', 'COM_Y'])
 
-    # Calculate statistics
-    stats = {
-        'total_particles': total_particles,
-        'total_images': total_images,
-        'particles_per_image': total_particles / total_images if total_images > 0 else 0,
-        'size_stats': {
-            'mean': np.mean(all_sizes),
-            'std': np.std(all_sizes),
-            'min': np.min(all_sizes),
-            'max': np.max(all_sizes),
-            'median': np.median(all_sizes)
-        },
-        'response_stats': {
-            'mean': np.mean(all_responses),
-            'std': np.std(all_responses),
-            'min': np.min(all_responses),
-            'max': np.max(all_responses),
-            'median': np.median(all_responses)
-        }
-    }
-
-    if all_areas:
-        stats['area_stats'] = {
-            'mean': np.mean(all_areas),
-            'std': np.std(all_areas),
-            'min': np.min(all_areas),
-            'max': np.max(all_areas),
-            'median': np.median(all_areas)
-        }
-
-    if all_volumes:
-        stats['volume_stats'] = {
-            'mean': np.mean(all_volumes),
-            'std': np.std(all_volumes),
-            'min': np.min(all_volumes),
-            'max': np.max(all_volumes),
-            'median': np.median(all_volumes)
-        }
-
-    if all_heights:
-        stats['height_stats'] = {
-            'mean': np.mean(all_heights),
-            'std': np.std(all_heights),
-            'min': np.min(all_heights),
-            'max': np.max(all_heights),
-            'median': np.median(all_heights)
-        }
-
-    return stats
-
-
-def ShowStatistics(results_dict):
-    """
-    Display statistics in a dialog window
-
-    Parameters:
-    results_dict : dict - Dictionary of analysis results
-    """
-    stats = CalculateStatistics(results_dict)
-
-    if not stats:
-        messagebox.showinfo("No Statistics", "No analysis results available.")
-        return
-
-    # Create statistics window
-    stats_window = tk.Toplevel()
-    stats_window.title("Particle Statistics")
-    stats_window.geometry("600x500")
-
-    # Text widget to display statistics
-    text_frame = ttk.Frame(stats_window, padding="10")
-    text_frame.pack(fill=tk.BOTH, expand=True)
-
-    text_widget = tk.Text(text_frame, wrap=tk.WORD)
-    scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-    text_widget.config(yscrollcommand=scrollbar.set)
-
-    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-    # Format statistics text
-    stats_text = f"""PARTICLE DETECTION STATISTICS
-
-Overall Summary:
-  Total Particles: {stats['total_particles']}
-  Total Images: {stats['total_images']}
-  Particles per Image: {stats['particles_per_image']:.2f}
-
-Size Statistics (Radius):
-  Mean: {stats['size_stats']['mean']:.3f}
-  Std Dev: {stats['size_stats']['std']:.3f}
-  Minimum: {stats['size_stats']['min']:.3f}
-  Maximum: {stats['size_stats']['max']:.3f}
-  Median: {stats['size_stats']['median']:.3f}
-
-Response Statistics:
-  Mean: {stats['response_stats']['mean']:.6f}
-  Std Dev: {stats['response_stats']['std']:.6f}
-  Minimum: {stats['response_stats']['min']:.6f}
-  Maximum: {stats['response_stats']['max']:.6f}
-  Median: {stats['response_stats']['median']:.6f}
-"""
-
-    if 'area_stats' in stats:
-        stats_text += f"""
-Area Statistics:
-  Mean: {stats['area_stats']['mean']:.3f}
-  Std Dev: {stats['area_stats']['std']:.3f}
-  Minimum: {stats['area_stats']['min']:.3f}
-  Maximum: {stats['area_stats']['max']:.3f}
-  Median: {stats['area_stats']['median']:.3f}
-"""
-
-    if 'volume_stats' in stats:
-        stats_text += f"""
-Volume Statistics:
-  Mean: {stats['volume_stats']['mean']:.3f}
-  Std Dev: {stats['volume_stats']['std']:.3f}
-  Minimum: {stats['volume_stats']['min']:.3f}
-  Maximum: {stats['volume_stats']['max']:.3f}
-  Median: {stats['volume_stats']['median']:.3f}
-"""
-
-    if 'height_stats' in stats:
-        stats_text += f"""
-Height Statistics:
-  Mean: {stats['height_stats']['mean']:.6f}
-  Std Dev: {stats['height_stats']['std']:.6f}
-  Minimum: {stats['height_stats']['min']:.6f}
-  Maximum: {stats['height_stats']['max']:.6f}
-  Median: {stats['height_stats']['median']:.6f}
-"""
-
-    text_widget.insert(1.0, stats_text)
-    text_widget.config(state=tk.DISABLED)
-
-    # Close button
-    button_frame = ttk.Frame(stats_window)
-    button_frame.pack(fill=tk.X, padx=10, pady=10)
-
-    ttk.Button(button_frame, text="Close",
-               command=stats_window.destroy).pack(side=tk.RIGHT)
-
-
-def ExportParticleData(info, filename):
-    """
-    Export particle data to CSV file
-
-    Parameters:
-    info : Wave - Particle information array
-    filename : str - Output filename
-    """
+    # Write to CSV
     import csv
-
-    with open(filename, 'w', newline='') as csvfile:
+    with open(file_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-
-        # Write header
-        header = ['X', 'Y', 'Radius', 'Response', 'Scale', 'Boundary',
-                  'Reserved1', 'Reserved2', 'Area', 'Volume', 'Height', 'COM_X', 'COM_Y']
         writer.writerow(header)
+        writer.writerows(all_data)
 
-        # Write data
-        for i in range(info.data.shape[0]):
-            row = info.data[i].tolist()
-            writer.writerow(row)
-
-    print(f"Particle data exported to {filename}")
+    print(f"Exported {len(all_data)} particles from {len(results_dict)} images to {file_path}")
 
 
-def Testing(string_input, number_input):
+def TestingParticleMeasurements(string_input, number_input):
     """Testing function for particle measurements module"""
     print(f"Particle measurements testing: {string_input}, {number_input}")
     return f"Measured: {string_input}_{number_input}"
+
+
+# Alias for Igor Pro compatibility
+Testing = TestingParticleMeasurements

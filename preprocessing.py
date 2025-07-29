@@ -57,49 +57,46 @@ def RemoveStreaks(im, sigma=3):
     threshold = mean_streak + sigma * std_streak
     streaky_rows = streakiness > threshold
 
-    streak_count = np.sum(streaky_rows)
-    print(f"Found {streak_count} streaky rows to correct")
+    print(f"Found {np.sum(streaky_rows)} streaky rows out of {height}")
 
-    # Correct streaky rows by replacing with interpolated values
+    # Interpolate streaky rows from neighboring good rows
     for i in range(height):
         if streaky_rows[i]:
-            # Find nearest non-streaky rows above and below
-            above_row = None
-            below_row = None
+            # Find nearest non-streaky rows
+            above = i - 1
+            below = i + 1
 
-            # Search upward
-            for j in range(i - 1, -1, -1):
-                if not streaky_rows[j]:
-                    above_row = j
-                    break
+            # Search for good row above
+            while above >= 0 and streaky_rows[above]:
+                above -= 1
 
-            # Search downward
-            for j in range(i + 1, height):
-                if not streaky_rows[j]:
-                    below_row = j
-                    break
+            # Search for good row below
+            while below < height and streaky_rows[below]:
+                below += 1
 
-            # Interpolate replacement row
-            if above_row is not None and below_row is not None:
-                # Linear interpolation between above and below
-                weight = (i - above_row) / (below_row - above_row)
-                im.data[i, :] = (1 - weight) * data[above_row, :] + weight * data[below_row, :]
-            elif above_row is not None:
+            # Interpolate from available good rows
+            if above >= 0 and below < height:
+                # Interpolate between above and below
+                weight_above = (below - i) / (below - above)
+                weight_below = (i - above) / (below - above)
+                im.data[i, :] = weight_above * data[above, :] + weight_below * data[below, :]
+            elif above >= 0:
                 # Use row above
-                im.data[i, :] = data[above_row, :]
-            elif below_row is not None:
+                im.data[i, :] = data[above, :]
+            elif below < height:
                 # Use row below
-                im.data[i, :] = data[below_row, :]
+                im.data[i, :] = data[below, :]
+
+    print("Streak removal complete")
 
 
-def Flatten(im, order=2):
+def Flatten(im, order):
     """
-    Flatten image by removing polynomial background from each row
-    Direct port from Igor Pro Flatten function
+    Flatten image by subtracting polynomial fit to each row (matching Igor Pro)
 
     Parameters:
     im : Wave - Input image to process
-    order : int - Order of polynomial for fitting (0 = disable)
+    order : int - Polynomial order for fitting
     """
     print(f"Flattening image with polynomial order = {order}")
 
@@ -245,34 +242,27 @@ def BatchPreprocess():
                 ]
             )
 
-            for file in files:
-                if file not in self.input_files:
-                    self.input_files.append(file)
-                    self.file_listbox.insert(tk.END, Path(file).name)
+            for file_path in files:
+                if file_path not in self.input_files:
+                    self.input_files.append(file_path)
+                    self.file_listbox.insert(tk.END, Path(file_path).name)
 
         def add_folder(self):
-            """Add all images from a folder"""
-            folder = filedialog.askdirectory(title="Select Folder Containing Images")
+            """Add all image files from a folder"""
+            folder_path = filedialog.askdirectory(title="Select Image Folder")
 
-            if folder:
-                extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.ibw']
+            if folder_path:
+                supported_extensions = ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.ibw']
 
-                for ext in extensions:
-                    for file_path in Path(folder).glob(f"*{ext}"):
-                        file_str = str(file_path)
-                        if file_str not in self.input_files:
-                            self.input_files.append(file_str)
-                            self.file_listbox.insert(tk.END, file_path.name)
-
-                    # Also check uppercase extensions
-                    for file_path in Path(folder).glob(f"*{ext.upper()}"):
-                        file_str = str(file_path)
-                        if file_str not in self.input_files:
-                            self.input_files.append(file_str)
+                for file_path in Path(folder_path).iterdir():
+                    if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
+                        full_path = str(file_path)
+                        if full_path not in self.input_files:
+                            self.input_files.append(full_path)
                             self.file_listbox.insert(tk.END, file_path.name)
 
         def clear_files(self):
-            """Clear the file list"""
+            """Clear file list"""
             self.input_files.clear()
             self.file_listbox.delete(0, tk.END)
 
@@ -284,9 +274,9 @@ def BatchPreprocess():
                 self.output_label.config(text=f"Output: {folder}")
 
         def start_preprocessing(self):
-            """Start the preprocessing operation"""
+            """Start batch preprocessing"""
             if not self.input_files:
-                messagebox.showwarning("No Files", "Please select input files.")
+                messagebox.showwarning("No Files", "Please add files to preprocess.")
                 return
 
             if not self.output_folder:
@@ -309,7 +299,7 @@ def BatchPreprocess():
 
                     try:
                         # Load image
-                        im = LoadImage(file_path)
+                        im = LoadWave(file_path)
                         if im is None:
                             print(f"Failed to load {file_path}")
                             continue
@@ -354,6 +344,8 @@ def GroupPreprocess(images_dict):
     """
     Group preprocessing for loaded images
     Apply preprocessing to all loaded images in memory
+    NOTE: This function is maintained for compatibility but is not used in the updated GUI
+    The new GUI uses "Single Preprocess" and "Batch Preprocess" instead
     """
     if not images_dict:
         messagebox.showwarning("No Images", "No images loaded for preprocessing.")
@@ -419,19 +411,23 @@ def get_preprocessing_params():
     params_frame.pack(fill=tk.X, pady=10)
 
     # Streak removal
-    ttk.Label(params_frame, text="Std. Deviations for streak removal (0 = disable):").grid(row=0, column=0, sticky=tk.W,
-                                                                                           pady=5)
-    streak_var = tk.DoubleVar(value=3)
-    ttk.Entry(params_frame, textvariable=streak_var, width=10).grid(row=0, column=1, padx=10)
+    streak_frame = ttk.Frame(params_frame)
+    streak_frame.pack(fill=tk.X, pady=5)
 
-    # Flattening
-    ttk.Label(params_frame, text="Polynomial order for flattening (0 = disable):").grid(row=1, column=0, sticky=tk.W,
-                                                                                        pady=5)
-    flatten_var = tk.IntVar(value=2)
-    ttk.Entry(params_frame, textvariable=flatten_var, width=10).grid(row=1, column=1, padx=10)
+    ttk.Label(streak_frame, text="Std. Deviations for streak removal (0 = disable):").pack(side=tk.LEFT)
+    streak_sdevs_var = tk.DoubleVar(value=3)  # Igor Pro default
+    ttk.Entry(streak_frame, textvariable=streak_sdevs_var, width=10).pack(side=tk.LEFT, padx=5)
+
+    # Flattening parameters
+    flatten_frame = ttk.Frame(params_frame)
+    flatten_frame.pack(fill=tk.X, pady=5)
+
+    ttk.Label(flatten_frame, text="Polynomial order for flattening (0 = disable):").pack(side=tk.LEFT)
+    flatten_order_var = tk.IntVar(value=2)  # Igor Pro default
+    ttk.Entry(flatten_frame, textvariable=flatten_order_var, width=10).pack(side=tk.LEFT, padx=5)
 
     def ok_clicked():
-        result[0] = (streak_var.get(), flatten_var.get())
+        result[0] = (streak_sdevs_var.get(), flatten_order_var.get())
         dialog.destroy()
 
     def cancel_clicked():
@@ -440,64 +436,31 @@ def get_preprocessing_params():
 
     # Buttons
     button_frame = ttk.Frame(main_frame)
-    button_frame.pack(side=tk.BOTTOM, pady=20)
+    button_frame.pack(side=tk.BOTTOM, pady=10)
 
     ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=5)
     ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
 
     dialog.wait_window()
-    root.destroy()
-
     return result[0]
 
 
-def NoiseReduction(image, method='gaussian', sigma=1.0):
+def SimpleContrastStretching(image):
     """
-    Apply noise reduction to image
+    Apply simple contrast stretching to image
 
     Parameters:
-    image : Wave - Input image
-    method : str - Noise reduction method ('gaussian', 'median')
-    sigma : float - Parameter for method
+    image : Wave - Input image to process
     """
-    if method == 'gaussian':
-        from scipy.ndimage import gaussian_filter
-        image.data = gaussian_filter(image.data, sigma=sigma)
-    elif method == 'median':
-        from scipy.ndimage import median_filter
-        kernel_size = int(2 * sigma + 1)
-        image.data = median_filter(image.data, size=kernel_size)
+    print("Applying contrast stretching...")
 
-    print(f"Applied {method} noise reduction with sigma={sigma}")
-
-
-def ContrastEnhancement(image, method='clahe', clip_limit=0.01):
-    """
-    Enhance image contrast
-
-    Parameters:
-    image : Wave - Input image
-    method : str - Enhancement method
-    clip_limit : float - Clipping limit for CLAHE
-    """
     try:
+        # Use skimage if available
         from skimage import exposure
-
-        if method == 'clahe':
-            # Contrast Limited Adaptive Histogram Equalization
-            image.data = exposure.equalize_adapthist(image.data, clip_limit=clip_limit)
-        elif method == 'histogram':
-            # Standard histogram equalization
-            image.data = exposure.equalize_hist(image.data)
-        elif method == 'stretch':
-            # Linear contrast stretching
-            p2, p98 = np.percentile(image.data, (2, 98))
-            image.data = exposure.rescale_intensity(image.data, in_range=(p2, p98))
-
-        print(f"Applied {method} contrast enhancement")
-
+        image.data = exposure.rescale_intensity(image.data)
+        print("Applied histogram equalization using skimage")
     except ImportError:
-        # Fallback simple contrast stretching
+        # Fallback: simple min-max stretching
         data_min = np.min(image.data)
         data_max = np.max(image.data)
         image.data = (image.data - data_min) / (data_max - data_min)
