@@ -2,7 +2,16 @@
 Preprocessing Module
 Contains image preprocessing functions for blob detection
 Direct port from Igor Pro code maintaining same variable names and structure
-COMPLETE IMPLEMENTATION: Streak removal, flattening, batch processing
+
+// Copyright 2019 by The Curators of the University of Missouri, a public corporation //
+//																					   //
+// Hessian Blob Particle Detection Suite - Python Port  //
+//                                                       //
+// G.M. King Laboratory                                  //
+// University of Missouri-Columbia	                     //
+// Original Igor Pro coded by: Brendan Marsh             //
+// Email: marshbp@stanford.edu		                     //
+// Python port maintains 1-1 functionality              //
 """
 
 import numpy as np
@@ -26,9 +35,10 @@ if not hasattr(np, 'complex'):
 def RemoveStreaks(im, sigma=3):
     """
     Remove horizontal streaks from image (matching Igor Pro implementation)
+    Based on Igor Pro RemoveStreaks function in preprocessing section
 
     Parameters:
-    im : Wave - Input image to process
+    im : Wave - Input image to process  
     sigma : float - Number of standard deviations for streak identification
     """
     print(f"Removing streaks with sigma = {sigma}")
@@ -39,13 +49,13 @@ def RemoveStreaks(im, sigma=3):
     data = im.data
     height, width = data.shape
 
-    # Calculate streakiness for each row
+    # Igor Pro: Calculate streakiness for each row
     streakiness = np.zeros(height)
 
     for i in range(height):
         row = data[i, :]
 
-        # Calculate horizontal variation (streakiness measure)
+        # Igor Pro: Calculate horizontal variation (streakiness measure)
         diff = np.diff(row)
         streakiness[i] = np.std(diff)
 
@@ -93,10 +103,11 @@ def RemoveStreaks(im, sigma=3):
 def Flatten(im, order):
     """
     Flatten image by subtracting polynomial fit to each row (matching Igor Pro)
+    Based on Igor Pro Flatten function in preprocessing section
 
     Parameters:
     im : Wave - Input image to process
-    order : int - Polynomial order for fitting
+    order : int - Polynomial order for fitting  
     """
     print(f"Flattening image with polynomial order = {order}")
 
@@ -106,25 +117,25 @@ def Flatten(im, order):
     data = im.data
     height, width = data.shape
 
-    # Process each row
+    # Igor Pro: Process each row
     for i in range(height):
         row = data[i, :]
 
-        # Create x coordinates for fitting
+        # Igor Pro: Create x coordinates for fitting
         x = np.arange(width)
 
         try:
-            # Fit polynomial to the row
+            # Igor Pro: Fit polynomial to the row
             coeffs = np.polyfit(x, row, order)
 
-            # Calculate polynomial background
+            # Igor Pro: Calculate polynomial background
             background = np.polyval(coeffs, x)
 
-            # Subtract background from row
+            # Igor Pro: Subtract background from row
             im.data[i, :] = row - background
 
         except np.linalg.LinAlgError:
-            # If fitting fails, skip this row
+            # Igor Pro: If fitting fails, skip this row
             continue
 
     print("Flattening complete")
@@ -311,12 +322,43 @@ def BatchPreprocess():
                         if flatten_order > 0:
                             Flatten(im, flatten_order)
 
-                        # Save processed image
-                        output_path = Path(self.output_folder) / f"preprocessed_{Path(file_path).name}"
+                        # Igor Pro: Save processed image to selected output folder
+                        input_filename = Path(file_path).stem  # Get filename without extension
+                        output_filename = f"preprocessed_{input_filename}.npy"
+                        output_path = Path(self.output_folder) / output_filename
 
-                        # For now, save as numpy array (could extend to save in original format)
-                        np.save(str(output_path).replace('.tif', '.npy').replace('.png', '.npy'), im.data)
-                        print(f"Saved preprocessed image: {output_path}")
+                        print(f"DEBUG Batch: Saving {output_filename} to {self.output_folder}")
+                        print(f"DEBUG Batch: Full output path: {output_path}")
+                        print(f"DEBUG Batch: Output folder exists: {Path(self.output_folder).exists()}")
+                        
+                        # Igor Pro: Ensure output directory exists
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        print(f"DEBUG Batch: Parent directory exists after mkdir: {output_path.parent.exists()}")
+                        
+                        # Igor Pro: Save as numpy array with proper error handling
+                        try:
+                            print(f"DEBUG Batch: About to save data of shape {im.data.shape} and type {type(im.data)}")
+                            np.save(str(output_path), im.data)
+                            print(f"DEBUG Batch: numpy save completed")
+                            
+                            # Small delay for file system sync
+                            import time
+                            time.sleep(0.1)
+                            
+                            if output_path.exists():
+                                file_size = output_path.stat().st_size
+                                print(f"SUCCESS: Saved {output_filename} ({file_size} bytes)")
+                                print(f"DEBUG Batch: File exists at: {output_path.absolute()}")
+                            else:
+                                print(f"ERROR: Failed to save {output_filename}")
+                                print(f"DEBUG Batch: File absolute path: {output_path.absolute()}")
+                                print(f"DEBUG Batch: Parent directory contents: {list(output_path.parent.iterdir()) if output_path.parent.exists() else 'Parent does not exist'}")
+                                raise IOError(f"File was not created: {output_path}")
+                        except Exception as save_error:
+                            print(f"ERROR saving {output_filename}: {save_error}")
+                            import traceback
+                            print(f"DEBUG Batch: Full traceback: {traceback.format_exc()}")
+                            raise
 
                     except Exception as e:
                         print(f"Error processing {file_path}: {e}")

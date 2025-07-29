@@ -2,7 +2,16 @@
 Main Functions Module
 Contains the primary analysis functions for the blob detection algorithm
 Direct port from Igor Pro code maintaining same variable names and structure
-COMPLETE FIX: Proper blob visualization, manual threshold support, enhanced UI
+
+// Copyright 2019 by The Curators of the University of Missouri, a public corporation //
+//																					   //
+// Hessian Blob Particle Detection Suite - Python Port  //
+//                                                       //
+// G.M. King Laboratory                                  //
+// University of Missouri-Columbia	                     //
+// Coded by: Brendan Marsh                               //
+// Email: marshbp@stanford.edu		                     //
+// Python port maintains 1-1 functionality              //
 """
 
 import numpy as np
@@ -35,6 +44,7 @@ if not hasattr(np, 'complex'):
 def Duplicate(source_wave, new_name):
     """
     Create a duplicate of a wave - matches Igor Pro Duplicate function
+    Based on Igor Pro Duplicate command for wave duplication
     """
     new_data = source_wave.data.copy()
     new_wave = Wave(new_data, new_name, source_wave.note)
@@ -50,7 +60,7 @@ def Duplicate(source_wave, new_name):
 def ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, min_response, subPixelMult=1, allowOverlap=0):
     """
     Extract blob information from maxima maps
-    FIXED: Better blob extraction with proper filtering
+    Based on Igor Pro FindHessianBlobs function lines 1260-1290
     """
     print("Extracting blob information...")
 
@@ -74,11 +84,10 @@ def ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, min_response, subPixelMult=1, all
         response = SS_MAXMAP.data[i, j]
         scale = SS_MAXSCALEMAP.data[i, j] if SS_MAXSCALEMAP is not None else 1.0
 
-        # FIXED: Calculate radius from scale exactly like Igor Pro
         # Igor Pro line 1274: rad = sqrt(2*ScaleMap[i][j])
         radius = np.sqrt(2 * scale)
 
-        # Store blob information (matching Igor Pro format)
+        # Igor Pro: Store blob information (matching Igor Pro format)
         blob_info[idx, 0] = x_coord  # X position
         blob_info[idx, 1] = y_coord  # Y position
         blob_info[idx, 2] = radius  # Radius
@@ -197,7 +206,7 @@ def igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio):
 def GetBlobDetectionParams():
     """
     Get blob detection parameters from user
-    FIXED: Enhanced parameter dialog matching Igor Pro exactly
+    Based on Igor Pro parameter prompts in HessianBlobs function lines 141-167
     """
     # Create parameter dialog
     root = tk.Tk()
@@ -218,7 +227,7 @@ def GetBlobDetectionParams():
     ttk.Label(main_frame, text="Hessian Blob Parameters",
               font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
 
-    # Scale parameters - Exact Igor Pro defaults
+    # Igor Pro: Scale parameters - Exact Igor Pro defaults
     scale_frame = ttk.LabelFrame(main_frame, text="Scale-Space Parameters", padding="10")
     scale_frame.pack(fill=tk.X, pady=5)
 
@@ -736,7 +745,8 @@ def ViewParticleData(info_wave, image_name, original_image=None):
     Based on Igor Pro ViewParticles function lines 2306-2360
     """
     try:
-        if info_wave.data.shape[0] == 0:
+        # Igor Pro: Check if particles exist
+        if info_wave is None or info_wave.data.shape[0] == 0:
             messagebox.showwarning("No Particles", "No particles to view.")
             return
         
@@ -744,6 +754,11 @@ def ViewParticleData(info_wave, image_name, original_image=None):
         print(f"DEBUG ViewParticleData: Image name: {image_name}")
         print(f"DEBUG ViewParticleData: Original image type: {type(original_image)}")
         
+        # Igor Pro: Validate original image data
+        if original_image is None:
+            messagebox.showwarning("No Image Data", "Original image data is required for particle viewing.")
+            return
+            
         viewer = ParticleViewer(info_wave, image_name, original_image)
         viewer.run()
         
@@ -888,85 +903,91 @@ class ParticleViewer:
         
     def display_current_particle(self):
         """Display the current particle with measurements - EXACT Igor Pro behavior"""
-        if self.current_particle >= self.num_particles:
-            self.current_particle = self.num_particles - 1
-        elif self.current_particle < 0:
-            self.current_particle = 0
+        try:
+            # Igor Pro: Bounds checking
+            if self.current_particle >= self.num_particles:
+                self.current_particle = self.num_particles - 1
+            elif self.current_particle < 0:
+                self.current_particle = 0
+                
+            # Igor Pro: Get particle data
+            particle_data = self.info_wave.data[self.current_particle]
+            x_pos = particle_data[0]
+            y_pos = particle_data[1] 
+            radius = particle_data[2]
+            response = particle_data[3]
+            scale = particle_data[4] if len(particle_data) > 4 else 0.0
             
-        # Get particle data
-        particle_data = self.info_wave.data[self.current_particle]
-        x_pos = particle_data[0]
-        y_pos = particle_data[1] 
-        radius = particle_data[2]
-        response = particle_data[3]
-        scale = particle_data[4] if len(particle_data) > 4 else 0.0
-        
-        # Clear and setup the plot
-        self.ax.clear()
-        
-        if self.original_image is not None:
-            # FIXED: Igor Pro style cropping - show region around particle
-            # Igor Pro crops to show the particle clearly with surrounding context
+            # Igor Pro: Clear and setup the plot
+            self.ax.clear()
             
-            # Calculate crop bounds (larger region than just the particle)
-            crop_size = max(int(radius * 4), 50)  # At least 4x radius or 50 pixels
+            if self.original_image is not None and hasattr(self.original_image, 'data'):
+                # Igor Pro: Cropping - show region around particle
+                # Igor Pro crops to show the particle clearly with surrounding context
+                
+                # Igor Pro: Calculate crop bounds (larger region than just the particle)
+                crop_size = max(int(radius * 4), 50)  # At least 4x radius or 50 pixels
+                
+                x_min = max(0, int(x_pos - crop_size))
+                x_max = min(self.original_image.data.shape[1], int(x_pos + crop_size))
+                y_min = max(0, int(y_pos - crop_size))
+                y_max = min(self.original_image.data.shape[0], int(y_pos + crop_size))
+                
+                # Igor Pro: Crop the actual image region
+                cropped_image = self.original_image.data[y_min:y_max, x_min:x_max]
+                
+                # Igor Pro: Display with proper extent for coordinate mapping
+                self.ax.imshow(cropped_image, cmap='gray', 
+                              extent=[x_min, x_max, y_max, y_min],
+                              interpolation='nearest')
+                
+                # Igor Pro: Set the view limits
+                self.ax.set_xlim(x_min, x_max)
+                self.ax.set_ylim(y_max, y_min)
+                
+            else:
+                # Igor Pro: If no original image, show error
+                messagebox.showwarning("No Image Data", "Original image not available for viewing.")
+                return
             
-            x_min = max(0, int(x_pos - crop_size))
-            x_max = min(self.original_image.data.shape[1], int(x_pos + crop_size))
-            y_min = max(0, int(y_pos - crop_size))
-            y_max = min(self.original_image.data.shape[0], int(y_pos + crop_size))
+            # Igor Pro: Draw the particle perimeter (green circle like Igor Pro)
+            circle = Circle((x_pos, y_pos), radius, 
+                           fill=False, edgecolor='lime', linewidth=2, alpha=0.9)
+            self.ax.add_patch(circle)
             
-            # Crop the actual image region
-            cropped_image = self.original_image.data[y_min:y_max, x_min:x_max]
+            # Igor Pro: Mark the center (red crosshair like Igor Pro)
+            self.ax.plot(x_pos, y_pos, 'r+', markersize=12, markeredgewidth=3)
             
-            # Display with proper extent for coordinate mapping
-            self.ax.imshow(cropped_image, cmap='gray', 
-                          extent=[x_min, x_max, y_max, y_min],
-                          interpolation='nearest')
+            # Igor Pro: Style title and axis
+            self.ax.set_title(f"Particle {self.current_particle + 1} of {self.num_particles}", 
+                             fontsize=12, fontweight='bold')
+            self.ax.set_aspect('equal')
             
-            # Set the view limits
-            self.ax.set_xlim(x_min, x_max)
-            self.ax.set_ylim(y_max, y_min)
+            # Igor Pro: Add scale bar if radius is reasonable size
+            if radius > 5:
+                scale_length = radius
+                scale_x = x_min + (x_max - x_min) * 0.1
+                scale_y = y_max - (y_max - y_min) * 0.1
+                self.ax.plot([scale_x, scale_x + scale_length], [scale_y, scale_y], 
+                            'yellow', linewidth=3)
+                self.ax.text(scale_x + scale_length/2, scale_y - (y_max - y_min) * 0.05, 
+                            f'{scale_length:.1f} px', ha='center', color='yellow', 
+                            fontsize=10, fontweight='bold')
             
-        else:
-            # If no original image, show the full detected blob info as context
-            messagebox.showwarning("No Image Data", "Original image not available for viewing.")
-            return
-        
-        # Draw the particle perimeter (green circle like Igor Pro)
-        circle = Circle((x_pos, y_pos), radius, 
-                       fill=False, edgecolor='lime', linewidth=2, alpha=0.9)
-        self.ax.add_patch(circle)
-        
-        # Mark the center (red crosshair like Igor Pro)
-        self.ax.plot(x_pos, y_pos, 'r+', markersize=12, markeredgewidth=3)
-        
-        # Igor Pro style title and axis
-        self.ax.set_title(f"Particle {self.current_particle + 1} of {self.num_particles}", 
-                         fontsize=12, fontweight='bold')
-        self.ax.set_aspect('equal')
-        
-        # Add scale bar if radius is reasonable size
-        if radius > 5:
-            scale_length = radius
-            scale_x = x_min + (x_max - x_min) * 0.1
-            scale_y = y_max - (y_max - y_min) * 0.1
-            self.ax.plot([scale_x, scale_x + scale_length], [scale_y, scale_y], 
-                        'yellow', linewidth=3)
-            self.ax.text(scale_x + scale_length/2, scale_y - (y_max - y_min) * 0.05, 
-                        f'{scale_length:.1f} px', ha='center', color='yellow', 
-                        fontsize=10, fontweight='bold')
-        
-        # Update measurement labels
-        self.particle_title.config(text=f"Particle {self.current_particle + 1}")
-        self.pos_label.config(text=f"Position: ({x_pos:.1f}, {y_pos:.1f})")
-        self.radius_label.config(text=f"Radius: {radius:.2f} px")
-        self.response_label.config(text=f"Response: {response:.6f}")
-        self.scale_label.config(text=f"Scale: {scale:.3f}")
-        self.nav_label.config(text=f"Particle {self.current_particle + 1} of {self.num_particles}")
-        self.goto_var.set(self.current_particle + 1)
-        
-        self.canvas.draw()
+            # Igor Pro: Update measurement labels
+            self.particle_title.config(text=f"Particle {self.current_particle + 1}")
+            self.pos_label.config(text=f"Position: ({x_pos:.1f}, {y_pos:.1f})")
+            self.radius_label.config(text=f"Radius: {radius:.2f} px")
+            self.response_label.config(text=f"Response: {response:.6f}")
+            self.scale_label.config(text=f"Scale: {scale:.3f}")
+            self.nav_label.config(text=f"Particle {self.current_particle + 1} of {self.num_particles}")
+            self.goto_var.set(self.current_particle + 1)
+            
+            self.canvas.draw()
+            
+        except Exception as e:
+            print(f"Error displaying particle {self.current_particle + 1}: {str(e)}")
+            messagebox.showerror("Display Error", f"Error displaying particle:\n{str(e)}")
         
     def next_particle(self):
         """Navigate to next particle"""

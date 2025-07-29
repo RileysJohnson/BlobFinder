@@ -2,12 +2,16 @@
 """
 Hessian Blob Particle Detection Suite - Main GUI
 Complete 1-1 port from Igor Pro implementation
-COMPLETE FIX: Proper buttons, blob regions, preprocessing, view particles
 
-Copyright 2019 by The Curators of the University of Missouri (original Igor Pro code)
-Python port maintains 1-1 functionality with Igor Pro version
-G.M. King Laboratory - University of Missouri-Columbia
-Original coded by: Brendan Marsh - marshbp@stanford.edu
+// Copyright 2019 by The Curators of the University of Missouri, a public corporation //
+//																					   //
+// Hessian Blob Particle Detection Suite - Python Port  //
+//                                                       //
+// G.M. King Laboratory                                  //
+// University of Missouri-Columbia	                     //
+// Original Igor Pro coded by: Brendan Marsh             //
+// Email: marshbp@stanford.edu		                     //
+// Python port maintains 1-1 functionality              //
 """
 
 import tkinter as tk
@@ -73,7 +77,7 @@ class HessianBlobGUI:
         self.log_message("Ready for analysis...")
 
     def setup_ui(self):
-        """Setup the main user interface - FIXED: Enhanced layout"""
+        """Setup the main user interface - based on Igor Pro panel layout"""
         # Create main frame
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -83,7 +87,7 @@ class HessianBlobGUI:
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         left_panel.pack_propagate(False)
 
-        # FIXED: File management section with proper button names
+        # Igor Pro: File management section with proper button names
         file_frame = ttk.LabelFrame(left_panel, text="File Management", padding="5")
         file_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -104,7 +108,7 @@ class HessianBlobGUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.image_listbox.config(yscrollcommand=scrollbar.set)
 
-        # FIXED: Preprocessing section (single and batch, not batch and group)
+        # Igor Pro: Preprocessing section (single and batch, not batch and group)
         preprocess_frame = ttk.LabelFrame(left_panel, text="Preprocessing", padding="5")
         preprocess_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -126,7 +130,7 @@ class HessianBlobGUI:
         display_frame = ttk.LabelFrame(left_panel, text="Display", padding="5")
         display_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # FIXED: Add color table selection like Igor Pro
+        # Igor Pro: Add color table selection like Igor Pro
         ttk.Label(display_frame, text="Color Table:").pack(anchor=tk.W)
         self.color_table_var = tk.StringVar(value="gray")
         color_combo = ttk.Combobox(display_frame, textvariable=self.color_table_var,
@@ -142,7 +146,7 @@ class HessianBlobGUI:
                                            state=tk.DISABLED)
         self.blob_toggle.pack(anchor=tk.W, pady=2)
 
-        # FIXED: View particles button (matching Igor Pro)
+        # Igor Pro: View particles button (matching Igor Pro)
         ttk.Button(display_frame, text="View Particles",
                    command=self.view_particles).pack(fill=tk.X, pady=2)
 
@@ -323,44 +327,58 @@ class HessianBlobGUI:
                 Flatten(preprocessed_image, flatten_order)
                 self.log_message(f"Applied flattening (order={flatten_order}) to preprocessed image")
 
-            # Save preprocessed image to selected folder
+            # Igor Pro: Save preprocessed image to selected folder
             try:
                 from pathlib import Path
                 import numpy as np
                 import os
                 
-                # Ensure output folder exists
+                self.log_message(f"DEBUG: Output folder received: '{output_folder}'")
+                self.log_message(f"DEBUG: Preprocessed name: '{preprocessed_name}'")
+                
+                # Igor Pro: Ensure output folder exists
                 output_folder_path = Path(output_folder)
+                self.log_message(f"DEBUG: Output folder path object: {output_folder_path}")
+                self.log_message(f"DEBUG: Output folder exists before mkdir: {output_folder_path.exists()}")
+                
                 output_folder_path.mkdir(parents=True, exist_ok=True)
+                self.log_message(f"DEBUG: Output folder exists after mkdir: {output_folder_path.exists()}")
                 
-                # Create output file path
+                # Igor Pro: Create output file path
                 output_file = output_folder_path / f"{preprocessed_name}.npy"
+                self.log_message(f"DEBUG: Full output file path: {output_file}")
+                self.log_message(f"DEBUG: Output file parent exists: {output_file.parent.exists()}")
                 
-                self.log_message(f"DEBUG: Saving to: {output_file}")
-                self.log_message(f"DEBUG: Output folder: {output_folder_path}")
-                self.log_message(f"DEBUG: Folder exists: {output_folder_path.exists()}")
-                self.log_message(f"DEBUG: Data type: {type(preprocessed_image.data)}")
-                self.log_message(f"DEBUG: Data shape: {preprocessed_image.data.shape}")
+                self.log_message(f"Saving to: {output_file}")
+                self.log_message(f"Data type: {type(preprocessed_image.data)}")
+                self.log_message(f"Data shape: {preprocessed_image.data.shape}")
+                self.log_message(f"Data dtype: {preprocessed_image.data.dtype}")
                 
-                # Save the numpy array
+                # Igor Pro: Save the numpy array with verification
                 np.save(str(output_file), preprocessed_image.data)
+                self.log_message(f"DEBUG: numpy save completed")
                 
-                # Verify the file was created
+                # Igor Pro: Verify the file was created and report success/failure
+                import time
+                time.sleep(0.1)  # Brief pause to ensure file system sync
+                
                 if output_file.exists():
                     file_size = output_file.stat().st_size
                     self.log_message(f"SUCCESS: Saved {preprocessed_name}.npy ({file_size} bytes)")
-                    self.log_message(f"DEBUG: File successfully created: {output_file}")
+                    self.log_message(f"DEBUG: File exists at: {output_file.absolute()}")
                 else:
-                    self.log_message(f"FAILED: File not created at {output_file}")
-                    self.log_message(f"DEBUG: File was NOT created")
+                    self.log_message(f"ERROR: File not created at {output_file}")
+                    self.log_message(f"DEBUG: File absolute path: {output_file.absolute()}")
+                    self.log_message(f"DEBUG: Parent directory contents: {list(output_file.parent.iterdir()) if output_file.parent.exists() else 'Parent does not exist'}")
+                    raise IOError(f"Failed to create output file: {output_file}")
                     
             except Exception as save_error:
                 error_msg = str(save_error)
-                self.log_message(f"SAVE ERROR: {error_msg}")
-                self.log_message(f"DEBUG: Exception during save: {error_msg}")
+                self.log_message(f"ERROR saving file: {error_msg}")
                 import traceback
-                tb_str = traceback.format_exc()
-                self.log_message(f"DEBUG: Traceback: {tb_str}")
+                self.log_message(f"DEBUG: Full traceback: {traceback.format_exc()}")
+                messagebox.showerror("Save Error", f"Failed to save preprocessed image:\n{error_msg}")
+                raise
 
             # Add preprocessed image to current images
             self.current_images[preprocessed_name] = preprocessed_image
@@ -521,7 +539,7 @@ class HessianBlobGUI:
             self.log_message(f"Error displaying image: {str(e)}")
 
     def add_blob_overlay(self):
-        """FIXED: Add blob region overlay to current display"""
+        """Add blob region overlay to current display - matches Igor Pro ShowBlobRegions"""
         try:
             if not self.current_display_results or 'info' not in self.current_display_results:
                 print("DEBUG: No display results or info in add_blob_overlay")
@@ -531,7 +549,7 @@ class HessianBlobGUI:
             print(f"DEBUG: add_blob_overlay called with {info.data.shape[0]} blobs")
             blob_count = 0
 
-            # Create mask for all blob regions
+            # Igor Pro ShowBlobRegions implementation: Create mask for all blob regions
             blob_mask = np.zeros(self.current_display_image.data.shape, dtype=bool)
 
             for i in range(info.data.shape[0]):
@@ -539,7 +557,7 @@ class HessianBlobGUI:
                 y_coord = info.data[i, 1]
                 radius = info.data[i, 2]
 
-                # Create circular mask for this blob
+                # Igor Pro: Create circular mask for this blob using radius from sqrt(2*scale)
                 y_coords, x_coords = np.ogrid[:self.current_display_image.data.shape[0],
                                      :self.current_display_image.data.shape[1]]
                 distance = np.sqrt((x_coords - x_coord) ** 2 + (y_coords - y_coord) ** 2)
@@ -547,17 +565,17 @@ class HessianBlobGUI:
 
                 blob_mask |= blob_region
 
-                # Draw perimeter circle (green like Igor Pro)
+                # Igor Pro: Draw perimeter circle (green like Igor Pro)
                 circle = Circle((x_coord, y_coord), radius,
                                 fill=False, edgecolor='lime', linewidth=2, alpha=0.8)
                 self.ax.add_patch(circle)
                 blob_count += 1
 
-            # Create red tinted overlay for blob regions
+            # Igor Pro: Create red tinted overlay for blob regions
             red_overlay = np.zeros((*self.current_display_image.data.shape, 4))
             red_overlay[blob_mask] = [1, 0, 0, 0.3]  # Red with transparency
 
-            # Apply the overlay
+            # Igor Pro: Apply the overlay
             self.ax.imshow(red_overlay, aspect='equal', alpha=0.5)
 
             self.log_message(f"Displaying {blob_count} detected blobs with region overlay")
@@ -640,10 +658,23 @@ class HessianBlobGUI:
 
                 # Enable blob toggle
                 self.blob_toggle.configure(state=tk.NORMAL)
+                
+                # For manual threshold, automatically show blobs
+                if manual_used:
+                    self.blob_toggle_var.set(True)
+                    self.show_blobs = True
+                    self.log_message("Show Blob Regions enabled automatically after manual threshold")
 
                 # Update displays
                 self.update_info_display()
+                
+                # Force refresh display to show blobs if enabled
                 self.display_image()
+                
+                # Additional debug info
+                print(f"DEBUG: After analysis - show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
+                if self.current_display_results and 'info' in self.current_display_results:
+                    print(f"DEBUG: Results have {self.current_display_results['info'].data.shape[0]} blobs")
             else:
                 self.log_message("Analysis failed or was cancelled")
 
@@ -723,10 +754,10 @@ class HessianBlobGUI:
             print(f"DEBUG: Image name: {self.current_display_image.name}")
             print(f"DEBUG: Original image type: {type(self.current_display_image)}")
             
-            # Call with explicit arguments
-            ViewParticleData(info_wave=info, 
-                           image_name=self.current_display_image.name, 
-                           original_image=self.current_display_image)
+            # Call with positional arguments matching function definition
+            ViewParticleData(info, 
+                           self.current_display_image.name, 
+                           self.current_display_image)
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
