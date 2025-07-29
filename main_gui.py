@@ -224,8 +224,9 @@ class HessianBlobGUI:
     def load_image(self):
         """FIXED: Load single or multiple image files (renamed from load_single_image)"""
         filetypes = [
-            ("All supported", "*.ibw *.tif *.tiff *.png *.jpg *.jpeg *.bmp"),
+            ("All supported", "*.ibw *.tif *.tiff *.png *.jpg *.jpeg *.bmp *.npy"),
             ("Igor Binary Wave", "*.ibw"),
+            ("Preprocessed NumPy", "*.npy"),
             ("TIFF files", "*.tif *.tiff"),
             ("PNG files", "*.png"),
             ("JPEG files", "*.jpg *.jpeg"),
@@ -265,7 +266,7 @@ class HessianBlobGUI:
         folder_path = filedialog.askdirectory(title="Select Image Folder")
 
         if folder_path:
-            supported_extensions = ['.ibw', '.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp']
+            supported_extensions = ['.ibw', '.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp', '.npy']
             loaded_count = 0
 
             try:
@@ -328,57 +329,39 @@ class HessianBlobGUI:
                 self.log_message(f"Applied flattening (order={flatten_order}) to preprocessed image")
 
             # Igor Pro: Save preprocessed image to selected folder
+            # Igor Pro: Save preprocessed image to selected folder
             try:
                 from pathlib import Path
                 import numpy as np
                 import os
-                
-                self.log_message(f"DEBUG: Output folder received: '{output_folder}'")
-                self.log_message(f"DEBUG: Preprocessed name: '{preprocessed_name}'")
-                
-                # Igor Pro: Ensure output folder exists
+
+                # Ensure output folder exists
                 output_folder_path = Path(output_folder)
-                self.log_message(f"DEBUG: Output folder path object: {output_folder_path}")
-                self.log_message(f"DEBUG: Output folder exists before mkdir: {output_folder_path.exists()}")
-                
                 output_folder_path.mkdir(parents=True, exist_ok=True)
-                self.log_message(f"DEBUG: Output folder exists after mkdir: {output_folder_path.exists()}")
-                
-                # Igor Pro: Create output file path
+
+                # Create output file path
                 output_file = output_folder_path / f"{preprocessed_name}.npy"
-                self.log_message(f"DEBUG: Full output file path: {output_file}")
-                self.log_message(f"DEBUG: Output file parent exists: {output_file.parent.exists()}")
-                
+
                 self.log_message(f"Saving to: {output_file}")
-                self.log_message(f"Data type: {type(preprocessed_image.data)}")
-                self.log_message(f"Data shape: {preprocessed_image.data.shape}")
-                self.log_message(f"Data dtype: {preprocessed_image.data.dtype}")
-                
-                # Igor Pro: Save the numpy array with verification
+
+                # Save the numpy array
                 np.save(str(output_file), preprocessed_image.data)
-                self.log_message(f"DEBUG: numpy save completed")
-                
-                # Igor Pro: Verify the file was created and report success/failure
+
+                # Verify the file was created
                 import time
                 time.sleep(0.1)  # Brief pause to ensure file system sync
-                
+
                 if output_file.exists():
                     file_size = output_file.stat().st_size
                     self.log_message(f"SUCCESS: Saved {preprocessed_name}.npy ({file_size} bytes)")
-                    self.log_message(f"DEBUG: File exists at: {output_file.absolute()}")
                 else:
-                    self.log_message(f"ERROR: File not created at {output_file}")
-                    self.log_message(f"DEBUG: File absolute path: {output_file.absolute()}")
-                    self.log_message(f"DEBUG: Parent directory contents: {list(output_file.parent.iterdir()) if output_file.parent.exists() else 'Parent does not exist'}")
                     raise IOError(f"Failed to create output file: {output_file}")
-                    
+
             except Exception as save_error:
                 error_msg = str(save_error)
                 self.log_message(f"ERROR saving file: {error_msg}")
-                import traceback
-                self.log_message(f"DEBUG: Full traceback: {traceback.format_exc()}")
                 messagebox.showerror("Save Error", f"Failed to save preprocessed image:\n{error_msg}")
-                raise
+                return
 
             # Add preprocessed image to current images
             self.current_images[preprocessed_name] = preprocessed_image
@@ -525,13 +508,19 @@ class HessianBlobGUI:
             self.ax.imshow(self.current_display_image.data, cmap=cmap, aspect='equal')
             self.ax.set_title(f"Image: {self.current_display_image.name}")
 
-            # FIXED: Add blob overlay if enabled and results exist
+            # Igor Pro: Add blob overlay if enabled and results exist
             print(f"DEBUG display_image: show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
+            if self.current_display_results:
+                print(f"DEBUG: Results keys: {self.current_display_results.keys()}")
+                if 'info' in self.current_display_results:
+                    print(f"DEBUG: Info shape: {self.current_display_results['info'].data.shape}")
+                    print(f"DEBUG: Manual threshold used: {self.current_display_results.get('manual_threshold_used', False)}")
+            
             if self.show_blobs and self.current_display_results:
                 print("DEBUG: Calling add_blob_overlay")
                 self.add_blob_overlay()
             else:
-                print("DEBUG: NOT calling add_blob_overlay")
+                print(f"DEBUG: NOT calling add_blob_overlay - show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
 
             self.canvas.draw()
 
@@ -650,31 +639,23 @@ class HessianBlobGUI:
                 blob_count = results['info'].data.shape[0] if results['info'] else 0
                 manual_used = results.get('manual_threshold_used', False)
                 self.log_message(f"Analysis complete: {blob_count} blobs detected (manual={manual_used})")
-                
-                # DEBUG: Print results structure
-                print(f"DEBUG MAIN GUI: Results keys: {results.keys()}")
-                print(f"DEBUG MAIN GUI: Info shape: {results['info'].data.shape}")
-                print(f"DEBUG MAIN GUI: Manual threshold used: {manual_used}")
 
                 # Enable blob toggle
                 self.blob_toggle.configure(state=tk.NORMAL)
-                
+
                 # For manual threshold, automatically show blobs
                 if manual_used:
+                    print(f"DEBUG: Manual threshold used, enabling blob display")
                     self.blob_toggle_var.set(True)
                     self.show_blobs = True
                     self.log_message("Show Blob Regions enabled automatically after manual threshold")
+                    print(f"DEBUG: set show_blobs={self.show_blobs}, toggle_var={self.blob_toggle_var.get()}")
 
                 # Update displays
                 self.update_info_display()
-                
+
                 # Force refresh display to show blobs if enabled
                 self.display_image()
-                
-                # Additional debug info
-                print(f"DEBUG: After analysis - show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
-                if self.current_display_results and 'info' in self.current_display_results:
-                    print(f"DEBUG: Results have {self.current_display_results['info'].data.shape[0]} blobs")
             else:
                 self.log_message("Analysis failed or was cancelled")
 
@@ -750,20 +731,20 @@ class HessianBlobGUI:
 
         try:
             info = self.current_display_results['info']
-            print(f"DEBUG: Calling ViewParticleData with info shape: {info.data.shape}")
-            print(f"DEBUG: Image name: {self.current_display_image.name}")
-            print(f"DEBUG: Original image type: {type(self.current_display_image)}")
-            
-            # Call with positional arguments matching function definition
-            ViewParticleData(info, 
-                           self.current_display_image.name, 
-                           self.current_display_image)
+
+            # Import ViewParticleData from main_functions
+            from main_functions import ViewParticleData
+
+            # Call with proper arguments
+            ViewParticleData(info,
+                             self.current_display_image.name,
+                             self.current_display_image)
+
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"DEBUG: ViewParticles error: {error_details}")
             self.log_message(f"Error viewing particles: {str(e)}")
-            messagebox.showerror("View Error", f"Failed to view particles:\n{str(e)}\n\nFull error:\n{error_details}")
+            messagebox.showerror("View Error", f"Failed to view particles:\n{str(e)}")
 
     def export_results(self):
         """Export analysis results to file"""

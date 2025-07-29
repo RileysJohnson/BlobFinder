@@ -9,6 +9,12 @@ import numpy as np
 from pathlib import Path
 import warnings
 
+# Handle numpy complex deprecation before importing igor
+try:
+    np.complex
+except AttributeError:
+    np.complex = complex
+
 # Try to import optional packages for different file formats
 # The igor package can be imported in different ways depending on version
 IGOR_AVAILABLE = False
@@ -59,10 +65,6 @@ except ImportError:
     SKIMAGE_AVAILABLE = False
 
 from igor_compatibility import Wave
-
-# Monkey patch for numpy complex deprecation
-if not hasattr(np, 'complex'):
-    np.complex = complex
 
 
 class DataFolder:
@@ -308,6 +310,43 @@ def LoadWave(file_path):
                 except Exception as e:
                     print(f"Error loading TIFF with PIL: {e}")
 
+        elif file_ext == '.npy':
+            # Igor Pro: Load preprocessed numpy array files
+            try:
+                print(f"Loading NPY file: {file_path}")
+                data = np.load(str(file_path))
+                
+                # Igor Pro: Ensure data is 2D and proper type
+                if data.ndim == 1:
+                    # Try to reshape if it's a flattened 2D image
+                    size = data.shape[0]
+                    sqrt_size = int(np.sqrt(size))
+                    if sqrt_size * sqrt_size == size:
+                        data = data.reshape(sqrt_size, sqrt_size)
+                        print(f"Reshaped 1D NPY data to 2D: {data.shape}")
+                    else:
+                        print(f"Warning: 1D NPY with {size} points, cannot auto-reshape to 2D")
+                        return None
+                elif data.ndim > 2:
+                    print(f"Warning: {data.ndim}D NPY data, using first 2D slice")
+                    if data.ndim == 3:
+                        data = data[:, :, 0]
+                    else:
+                        data = data.squeeze()
+                        if data.ndim > 2:
+                            data = data[:, :, 0]
+                
+                # Igor Pro: Convert to float64 for consistency
+                data = data.astype(np.float64)
+                
+                wave = Wave(data, file_path.stem)
+                print(f"Successfully loaded NPY: {data.shape}, {data.dtype}")
+                return wave
+                
+            except Exception as e:
+                print(f"Error loading NPY file: {e}")
+                return None
+
         elif file_ext in ['.png', '.jpg', '.jpeg', '.bmp', '.gif']:
             # Standard image formats
             if PIL_AVAILABLE:
@@ -346,7 +385,7 @@ def LoadWave(file_path):
 
         else:
             print(f"Unsupported file format: {file_ext}")
-            print("Supported formats: .ibw, .tif, .tiff, .png, .jpg, .jpeg")
+            print("Supported formats: .ibw, .tif, .tiff, .png, .jpg, .jpeg, .npy")
             return None
 
     except Exception as e:
