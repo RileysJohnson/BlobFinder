@@ -296,25 +296,80 @@ class HessianBlobGUI:
             return
 
         try:
-            # Get preprocessing parameters
+            # Get preprocessing parameters and output folder
             result = self.get_single_preprocess_params()
             if result is None:
                 return
 
-            streak_sdevs, flatten_order = result
+            streak_sdevs, flatten_order, output_folder = result
+            
+            if not output_folder:
+                self.log_message("No output folder selected")
+                return
 
-            # Apply preprocessing to current image
+            # Create a copy for preprocessing
+            original_name = self.current_display_image.name
+            base_name = original_name.rsplit('.', 1)[0] if '.' in original_name else original_name
+            preprocessed_name = f"{base_name}_preprocessed"
+            
+            preprocessed_image = Duplicate(self.current_display_image, preprocessed_name)
+            
+            # Apply preprocessing to the copy
             if streak_sdevs > 0:
-                RemoveStreaks(self.current_display_image, sigma=streak_sdevs)
-                self.log_message(f"Applied streak removal (σ={streak_sdevs}) to current image")
+                RemoveStreaks(preprocessed_image, sigma=streak_sdevs)
+                self.log_message(f"Applied streak removal (σ={streak_sdevs}) to preprocessed image")
 
             if flatten_order > 0:
-                Flatten(self.current_display_image, flatten_order)
-                self.log_message(f"Applied flattening (order={flatten_order}) to current image")
+                Flatten(preprocessed_image, flatten_order)
+                self.log_message(f"Applied flattening (order={flatten_order}) to preprocessed image")
 
-            # Refresh display
+            # Save preprocessed image to selected folder
+            try:
+                from pathlib import Path
+                import numpy as np
+                import os
+                
+                # Ensure output folder exists
+                output_folder_path = Path(output_folder)
+                output_folder_path.mkdir(parents=True, exist_ok=True)
+                
+                # Create output file path
+                output_file = output_folder_path / f"{preprocessed_name}.npy"
+                
+                self.log_message(f"DEBUG: Saving to: {output_file}")
+                self.log_message(f"DEBUG: Output folder: {output_folder_path}")
+                self.log_message(f"DEBUG: Folder exists: {output_folder_path.exists()}")
+                self.log_message(f"DEBUG: Data type: {type(preprocessed_image.data)}")
+                self.log_message(f"DEBUG: Data shape: {preprocessed_image.data.shape}")
+                
+                # Save the numpy array
+                np.save(str(output_file), preprocessed_image.data)
+                
+                # Verify the file was created
+                if output_file.exists():
+                    file_size = output_file.stat().st_size
+                    self.log_message(f"SUCCESS: Saved {preprocessed_name}.npy ({file_size} bytes)")
+                    self.log_message(f"DEBUG: File successfully created: {output_file}")
+                else:
+                    self.log_message(f"FAILED: File not created at {output_file}")
+                    self.log_message(f"DEBUG: File was NOT created")
+                    
+            except Exception as save_error:
+                error_msg = str(save_error)
+                self.log_message(f"SAVE ERROR: {error_msg}")
+                self.log_message(f"DEBUG: Exception during save: {error_msg}")
+                import traceback
+                tb_str = traceback.format_exc()
+                self.log_message(f"DEBUG: Traceback: {tb_str}")
+
+            # Add preprocessed image to current images
+            self.current_images[preprocessed_name] = preprocessed_image
+            self.update_image_list()
+            
+            # Display the preprocessed image
+            self.current_display_image = preprocessed_image
             self.display_image()
-            self.log_message("Single preprocessing completed.")
+            self.log_message(f"Single preprocessing completed. Created: {preprocessed_name}")
 
         except Exception as e:
             self.log_message(f"Error in single preprocessing: {str(e)}")
@@ -328,18 +383,37 @@ class HessianBlobGUI:
 
         dialog = tk.Toplevel()
         dialog.title("Single Image Preprocessing")
-        dialog.geometry("500x200")
+        dialog.geometry("600x300")
         dialog.transient()
         dialog.grab_set()
         dialog.focus_set()
 
         result = [None]
+        output_folder = [None]
 
         main_frame = ttk.Frame(dialog, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         ttk.Label(main_frame, text="Preprocessing Parameters",
                   font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
+
+        # Output folder selection
+        folder_frame = ttk.Frame(main_frame)
+        folder_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Label(folder_frame, text="Output folder:").pack(anchor=tk.W)
+        folder_display = ttk.Label(folder_frame, text="No folder selected", 
+                                  foreground="red", font=('TkDefaultFont', 9))
+        folder_display.pack(anchor=tk.W, pady=2)
+        
+        def select_folder():
+            folder = filedialog.askdirectory(title="Select Output Folder")
+            if folder:
+                output_folder[0] = folder
+                folder_display.config(text=folder, foreground="green")
+        
+        ttk.Button(folder_frame, text="Select Output Folder", 
+                  command=select_folder).pack(anchor=tk.W, pady=5)
 
         # Parameters frame
         params_frame = ttk.Frame(main_frame)
@@ -362,7 +436,10 @@ class HessianBlobGUI:
         ttk.Entry(flatten_frame, textvariable=flatten_order_var, width=10).pack(side=tk.LEFT, padx=5)
 
         def ok_clicked():
-            result[0] = (streak_sdevs_var.get(), flatten_order_var.get())
+            if not output_folder[0]:
+                messagebox.showwarning("No Folder", "Please select an output folder.")
+                return
+            result[0] = (streak_sdevs_var.get(), flatten_order_var.get(), output_folder[0])
             dialog.destroy()
 
         def cancel_clicked():
@@ -431,8 +508,12 @@ class HessianBlobGUI:
             self.ax.set_title(f"Image: {self.current_display_image.name}")
 
             # FIXED: Add blob overlay if enabled and results exist
+            print(f"DEBUG display_image: show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
             if self.show_blobs and self.current_display_results:
+                print("DEBUG: Calling add_blob_overlay")
                 self.add_blob_overlay()
+            else:
+                print("DEBUG: NOT calling add_blob_overlay")
 
             self.canvas.draw()
 
@@ -443,9 +524,11 @@ class HessianBlobGUI:
         """FIXED: Add blob region overlay to current display"""
         try:
             if not self.current_display_results or 'info' not in self.current_display_results:
+                print("DEBUG: No display results or info in add_blob_overlay")
                 return
 
             info = self.current_display_results['info']
+            print(f"DEBUG: add_blob_overlay called with {info.data.shape[0]} blobs")
             blob_count = 0
 
             # Create mask for all blob regions
@@ -486,6 +569,8 @@ class HessianBlobGUI:
         """FIXED: Toggle blob overlay display"""
         self.show_blobs = self.blob_toggle_var.get()
         self.log_message(f"Blob display: {'ON' if self.show_blobs else 'OFF'}")
+        print(f"DEBUG: Toggle blob display called, show_blobs={self.show_blobs}")
+        print(f"DEBUG: Current display results exist: {self.current_display_results is not None}")
         if self.current_display_image is not None:
             self.display_image()
 
@@ -545,7 +630,13 @@ class HessianBlobGUI:
                 self.current_display_results = results
 
                 blob_count = results['info'].data.shape[0] if results['info'] else 0
-                self.log_message(f"Analysis complete: {blob_count} blobs detected")
+                manual_used = results.get('manual_threshold_used', False)
+                self.log_message(f"Analysis complete: {blob_count} blobs detected (manual={manual_used})")
+                
+                # DEBUG: Print results structure
+                print(f"DEBUG MAIN GUI: Results keys: {results.keys()}")
+                print(f"DEBUG MAIN GUI: Info shape: {results['info'].data.shape}")
+                print(f"DEBUG MAIN GUI: Manual threshold used: {manual_used}")
 
                 # Enable blob toggle
                 self.blob_toggle.configure(state=tk.NORMAL)
@@ -628,10 +719,20 @@ class HessianBlobGUI:
 
         try:
             info = self.current_display_results['info']
-            ViewParticleData(info, self.current_display_image.name)
+            print(f"DEBUG: Calling ViewParticleData with info shape: {info.data.shape}")
+            print(f"DEBUG: Image name: {self.current_display_image.name}")
+            print(f"DEBUG: Original image type: {type(self.current_display_image)}")
+            
+            # Call with explicit arguments
+            ViewParticleData(info_wave=info, 
+                           image_name=self.current_display_image.name, 
+                           original_image=self.current_display_image)
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"DEBUG: ViewParticles error: {error_details}")
             self.log_message(f"Error viewing particles: {str(e)}")
-            messagebox.showerror("View Error", f"Failed to view particles:\n{str(e)}")
+            messagebox.showerror("View Error", f"Failed to view particles:\n{str(e)}\n\nFull error:\n{error_details}")
 
     def export_results(self):
         """Export analysis results to file"""

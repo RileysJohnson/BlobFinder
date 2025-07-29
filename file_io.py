@@ -599,17 +599,17 @@ def test_igor_package():
         print("❌ Igor package not available")
         return False
 
-    print(f"✓ Igor package imported successfully")
+    print(f"OK Igor package imported successfully")
     print(f"  Module: {bw.__name__ if hasattr(bw, '__name__') else 'unknown'}")
     print(f"  Has load method: {hasattr(bw, 'load')}")
     print(f"  Has read method: {hasattr(bw, 'read')}")
 
     if hasattr(bw, 'load'):
-        print("✓ Using bw.load() method")
+        print("OK Using bw.load() method")
     elif hasattr(bw, 'read'):
-        print("✓ Using bw.read() method")
+        print("OK Using bw.read() method")
     else:
-        print("❌ No suitable load method found")
+        print("ERROR: No suitable load method found")
         return False
 
     return True
@@ -620,5 +620,5 @@ def Testing(string_input, number_input):
     print(f"File I/O testing: {string_input}, {number_input}")
     # Also test igor package if this is called
     if not test_igor_package():
-        print("⚠️  Igor package test failed")
+        print("WARNING: Igor package test failed")
     return len(string_input) + number_input

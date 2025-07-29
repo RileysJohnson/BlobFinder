@@ -13,8 +13,7 @@ Usage:
 
 Copyright 2019 by The Curators of the University of Missouri (original Igor Pro code)
 Python port maintains 1-1 functionality with Igor Pro version
-G.M. King Laboratory - University of Missouri-Columbia
-Original coded by: Brendan Marsh - marshbp@stanford.edu
+G.M. King Laboratory - University of Missouri-ColumbiaOriginal coded by: Brendan Marsh - marshbp@stanford.edu
 """
 
 import sys
@@ -53,7 +52,7 @@ def check_python_version():
         print("ERROR: Python 3.7 or higher is required.")
         print(f"Current version: {major}.{minor}")
         return False
-    print(f"✓ Python version: {major}.{minor}")
+    print(f"OK Python version: {major}.{minor}")
     return True
 
 
@@ -91,18 +90,18 @@ def check_dependencies():
                 import matplotlib.pyplot as plt
             else:
                 __import__(import_name)
-            print(f"✓ {package_name}: Available")
+            print(f"OK {package_name}: Available")
         except ImportError:
-            print(f"✗ {package_name}: Missing (REQUIRED)")
+            print(f"X {package_name}: Missing (REQUIRED)")
             missing_required.append(package_name)
 
     # Check optional packages
     for package_name, import_name in optional_packages:
         try:
             __import__(import_name)
-            print(f"✓ {package_name}: Available")
+            print(f"OK {package_name}: Available")
         except ImportError:
-            print(f"○ {package_name}: Missing (optional)")
+            print(f"O {package_name}: Missing (optional)")
             missing_optional.append(package_name)
 
     if missing_required:
@@ -145,17 +144,17 @@ def check_file_structure():
     for filename in required_files:
         filepath = current_dir / filename
         if filepath.exists():
-            print(f"✓ {filename}: Found")
+            print(f"OK {filename}: Found")
         else:
-            print(f"✗ {filename}: Missing")
+            print(f"X {filename}: Missing")
             missing_files.append(filename)
 
     for filename in optional_files:
         filepath = current_dir / filename
         if filepath.exists():
-            print(f"✓ {filename}: Found")
+            print(f"OK {filename}: Found")
         else:
-            print(f"○ {filename}: Optional (will use fallback)")
+            print(f"O {filename}: Optional (will use fallback)")
 
     print()
 
@@ -246,32 +245,32 @@ def test_core_functionality():
         test_data = np.random.rand(10, 10)
         test_wave = Wave(test_data, "test")
         assert DimSize(test_wave, 0) == 10
-        print("✓ Igor compatibility: OK")
+        print("OK Igor compatibility: OK")
 
         # Test file_io
         from file_io import LoadWave, Testing as file_io_test
         result = file_io_test("test", 1)
-        print("✓ File I/O: OK")
+        print("OK File I/O: OK")
 
         # Test utilities
         from utilities import Testing as util_test
         result = util_test("test", 1)
-        print("✓ Utilities: OK")
+        print("OK Utilities: OK")
 
         # Test scale_space
         from scale_space import Testing as scale_test
         result = scale_test("test", 1)
-        print("✓ Scale space: OK")
+        print("OK Scale space: OK")
 
         # Test main_functions
         from main_functions import Testing as main_test
         result = main_test("test", 1)
-        print("✓ Main functions: OK")
+        print("OK Main functions: OK")
 
         return True
 
     except Exception as e:
-        print(f"✗ Core functionality test failed: {str(e)}")
+        print(f"X Core functionality test failed: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
@@ -347,7 +346,7 @@ def main():
         # Test file I/O before launching GUI
         from file_io import test_igor_package
         if not test_igor_package():
-            print("⚠️  Igor package test failed - IBW files may not load properly")
+            print("WARNING: Igor package test failed - IBW files may not load properly")
             print("   Try: pip install --upgrade igor")
             print()
 
