@@ -61,13 +61,10 @@ def ViewParticles(im, info, mapNum=None):
             self.current_particle = 0
             self.total_particles = info.data.shape[0]
 
-            # Viewer settings - matches Igor Pro defaults
+            # Viewer settings - matches Igor Pro defaults  
             self.color_table = "Grays"
-            self.color_range = -1  # Auto range
             self.interpolate = False
             self.show_perimeter = True
-            self.x_range = -1  # Auto range
-            self.y_range = -1  # Auto range
 
             self.create_window()
             self.update_display()
@@ -145,8 +142,6 @@ def ViewParticles(im, info, mapNum=None):
 
             ttk.Button(action_frame, text="Delete Particle",
                        command=self.delete_particle).pack(fill=tk.X, pady=2)
-            ttk.Button(action_frame, text="Zoom Fit",
-                       command=self.zoom_fit).pack(fill=tk.X, pady=2)
             ttk.Button(action_frame, text="Close",
                        command=self.root.destroy).pack(fill=tk.X, pady=2)
 
@@ -237,9 +232,9 @@ def ViewParticles(im, info, mapNum=None):
             if len(particle_data) > 8:
                 info_text += f"\nArea: {particle_data[8]:.2f}\n"
             if len(particle_data) > 9:
-                info_text += f"Volume: {particle_data[9]:.2f}\n"
+                info_text += f"Volume: {particle_data[9]:.3e}\n"
             if len(particle_data) > 10:
-                info_text += f"Height: {particle_data[10]:.2f}\n"
+                info_text += f"Height: {particle_data[10]:.3e}\n"
 
             self.info_text.insert(tk.END, info_text)
 
@@ -285,10 +280,6 @@ def ViewParticles(im, info, mapNum=None):
                     self.current_particle = self.total_particles - 1
 
                 self.update_display()
-
-        def zoom_fit(self):
-            """Fit particle in view"""
-            self.update_display()
 
     # Create and show the viewer
     viewer = ParticleViewer(im, info)

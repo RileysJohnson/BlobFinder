@@ -5,7 +5,8 @@
       "Bash(findstr:*)",
       "Bash(find:*)",
       "Bash(timeout:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }

@@ -485,9 +485,16 @@ class HessianBlobGUI:
                 self.display_image()
                 self.update_info_display()
 
-                # FIXED: Enable blob toggle if results exist (works with manual mode too)
-                if self.current_display_results:
-                    self.blob_toggle.configure(state=tk.NORMAL)
+                # FIXED: Enable blob toggle if results exist for ANY threshold mode
+                if self.current_display_results and 'info' in self.current_display_results:
+                    info = self.current_display_results['info']
+                    if info is not None and info.data.shape[0] > 0:
+                        self.blob_toggle.configure(state=tk.NORMAL)
+                        print(f"DEBUG: Enabled blob toggle for {info.data.shape[0]} blobs")
+                    else:
+                        self.blob_toggle.configure(state=tk.DISABLED)
+                        self.show_blobs = False
+                        self.blob_toggle_var.set(False)
                 else:
                     self.blob_toggle.configure(state=tk.DISABLED)
                     self.show_blobs = False
@@ -528,16 +535,28 @@ class HessianBlobGUI:
             self.log_message(f"Error displaying image: {str(e)}")
 
     def add_blob_overlay(self):
-        """Add blob region overlay to current display - matches Igor Pro ShowBlobRegions"""
+        """FIXED: Add blob region overlay to current display - works for ALL threshold modes"""
         try:
             if not self.current_display_results or 'info' not in self.current_display_results:
                 print("DEBUG: No display results or info in add_blob_overlay")
                 return
 
             info = self.current_display_results['info']
-            print(f"DEBUG: add_blob_overlay called with {info.data.shape[0]} blobs")
-            blob_count = 0
+            if info is None or info.data.shape[0] == 0:
+                print("DEBUG: No blob info or empty blob data")
+                return
 
+            print(f"DEBUG: add_blob_overlay called with {info.data.shape[0]} blobs")
+
+            # Remove any existing blob overlays first
+            for patch in self.ax.patches[:]:
+                patch.remove()
+
+            # Clear any existing overlays (keep main image, remove overlays)
+            for image in self.ax.images[1:]:
+                image.remove()
+
+            blob_count = 0
             # Igor Pro ShowBlobRegions implementation: Create mask for all blob regions
             blob_mask = np.zeros(self.current_display_image.data.shape, dtype=bool)
 
@@ -546,7 +565,7 @@ class HessianBlobGUI:
                 y_coord = info.data[i, 1]
                 radius = info.data[i, 2]
 
-                # Igor Pro: Create circular mask for this blob using radius from sqrt(2*scale)
+                # Igor Pro: Create circular mask for this blob using radius
                 y_coords, x_coords = np.ogrid[:self.current_display_image.data.shape[0],
                                      :self.current_display_image.data.shape[1]]
                 distance = np.sqrt((x_coords - x_coord) ** 2 + (y_coords - y_coord) ** 2)
@@ -568,9 +587,11 @@ class HessianBlobGUI:
             self.ax.imshow(red_overlay, aspect='equal', alpha=0.5)
 
             self.log_message(f"Displaying {blob_count} detected blobs with region overlay")
+            print(f"DEBUG: Successfully added overlay for {blob_count} blobs")
 
         except Exception as e:
             self.log_message(f"Error adding blob overlay: {str(e)}")
+            print(f"DEBUG: Exception in add_blob_overlay: {str(e)}")
 
     def toggle_blob_display(self):
         """FIXED: Toggle blob overlay display"""
@@ -637,19 +658,21 @@ class HessianBlobGUI:
                 self.current_display_results = results
 
                 blob_count = results['info'].data.shape[0] if results['info'] else 0
+                threshold_mode = results.get('detHResponseThresh', 'unknown')
                 manual_used = results.get('manual_threshold_used', False)
-                self.log_message(f"Analysis complete: {blob_count} blobs detected (manual={manual_used})")
 
-                # Enable blob toggle
+                self.log_message(f"Analysis complete: {blob_count} blobs detected")
+                self.log_message(f"Threshold mode: {threshold_mode} (manual={manual_used})")
+
+                # FIXED: Enable blob toggle for ALL threshold modes
                 self.blob_toggle.configure(state=tk.NORMAL)
 
-                # For manual threshold, automatically show blobs
-                if manual_used:
-                    print(f"DEBUG: Manual threshold used, enabling blob display")
+                # FIXED: Auto-enable blob display for ALL modes with detected blobs
+                if blob_count > 0:
                     self.blob_toggle_var.set(True)
                     self.show_blobs = True
-                    self.log_message("Show Blob Regions enabled automatically after manual threshold")
-                    print(f"DEBUG: set show_blobs={self.show_blobs}, toggle_var={self.blob_toggle_var.get()}")
+                    self.log_message("Show Blob Regions enabled automatically")
+                    print(f"DEBUG: Auto-enabled blob display for {blob_count} blobs")
 
                 # Update displays
                 self.update_info_display()
@@ -724,27 +747,23 @@ class HessianBlobGUI:
             messagebox.showerror("Batch Analysis Error", f"Batch analysis failed:\n{str(e)}")
 
     def view_particles(self):
-        """FIXED: View particle data in table format"""
-        if not self.current_display_results or 'info' not in self.current_display_results:
-            messagebox.showwarning("No Results", "No analysis results to display.")
+        """FIXED: Launch particle viewer for current results - works for ALL threshold modes"""
+        if self.current_display_results is None:
+            messagebox.showwarning("No Results", "Please run analysis first.")
             return
 
+        info = self.current_display_results.get('info')
+        if info is None or info.data.shape[0] == 0:
+            messagebox.showwarning("No Particles", "No particles detected in current analysis.")
+            return
+
+        # Import and launch particle viewer using the working version from particle_measurements.py
         try:
-            info = self.current_display_results['info']
-
-            # Import ViewParticleData from main_functions
-            from main_functions import ViewParticleData
-
-            # Call with proper arguments
-            ViewParticleData(info,
-                             self.current_display_image.name,
-                             self.current_display_image)
-
+            from particle_measurements import ViewParticles
+            print(f"DEBUG: Launching particle viewer with {info.data.shape[0]} particles")
+            ViewParticles(self.current_display_image, info)
         except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            self.log_message(f"Error viewing particles: {str(e)}")
-            messagebox.showerror("View Error", f"Failed to view particles:\n{str(e)}")
+            messagebox.showerror("Viewer Error", f"Failed to open particle viewer:\n{str(e)}")
 
     def export_results(self):
         """Export analysis results to file"""

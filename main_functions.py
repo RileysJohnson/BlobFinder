@@ -18,8 +18,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 from matplotlib.patches import Circle
+from matplotlib.figure import Figure
 import tkinter as tk
-from tkinter import messagebox, ttk, simpledialog
+from tkinter import messagebox, ttk, simpledialog, scrolledtext
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy import ndimage
 
@@ -727,6 +728,12 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     RegisterWave(info, "info")
 
     print(f"Hessian blob detection complete. Found {info.data.shape[0]} blobs.")
+    
+    # Calculate particle measurements (height, volume, area, etc.)
+    if info.data.shape[0] > 0:
+        from particle_measurements import MeasureParticles
+        MeasureParticles(im, info)
+        print(f"Calculated measurements for {info.data.shape[0]} particles")
 
     return {
         'info': info,
@@ -735,7 +742,10 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         'detH': detH,
         'LG': LG,
         'threshold': minResponse,
-        'manual_threshold_used': detHResponseThresh == -2  # Flag for manual threshold
+        'detHResponseThresh': detHResponseThresh,  # Original threshold mode
+        'manual_threshold_used': detHResponseThresh == -2,  # Flag for manual threshold
+        'auto_threshold_used': detHResponseThresh == -1,  # Flag for auto threshold
+        'manual_value_used': detHResponseThresh > 0  # Flag for manual value
     }
 
 
@@ -759,8 +769,9 @@ def ViewParticleData(info_wave, image_name, original_image=None):
             messagebox.showwarning("No Image Data", "Original image data is required for particle viewing.")
             return
             
-        viewer = ParticleViewer(info_wave, image_name, original_image)
-        viewer.run()
+        # Use the working ViewParticles function from particle_measurements.py
+        from particle_measurements import ViewParticles
+        ViewParticles(original_image, info_wave)
         
     except Exception as e:
         print(f"DEBUG ViewParticleData error: {str(e)}")

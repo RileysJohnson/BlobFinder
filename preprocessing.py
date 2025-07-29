@@ -324,7 +324,7 @@ def BatchPreprocess():
 
                         # Igor Pro: Save processed image to selected output folder
                         input_filename = Path(file_path).stem  # Get filename without extension
-                        output_filename = f"preprocessed_{input_filename}.npy"
+                        output_filename = f"{input_filename}_preprocessed.npy"
                         output_path = Path(self.output_folder) / output_filename
 
                         print(f"DEBUG Batch: Saving {output_filename} to {self.output_folder}")
