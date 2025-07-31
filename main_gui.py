@@ -148,10 +148,9 @@ class HessianBlobGUI:
 
         # Igor Pro: View particles button (matching Igor Pro)
         self.view_particles_button = ttk.Button(display_frame, text="View Particles",
-                                               command=self.view_particles,
-                                               state=tk.DISABLED)
+                                                command=self.view_particles,
+                                                state=tk.DISABLED)
         self.view_particles_button.pack(fill=tk.X, pady=2)
-        
 
         # Results info
         info_frame = ttk.LabelFrame(left_panel, text="Results Info", padding="5")
@@ -310,7 +309,7 @@ class HessianBlobGUI:
                 return
 
             streak_sdevs, flatten_order, output_folder = result
-            
+
             if not output_folder:
                 self.log_message("No output folder selected")
                 return
@@ -319,9 +318,9 @@ class HessianBlobGUI:
             original_name = self.current_display_image.name
             base_name = original_name.rsplit('.', 1)[0] if '.' in original_name else original_name
             preprocessed_name = f"{base_name}_preprocessed"
-            
+
             preprocessed_image = Duplicate(self.current_display_image, preprocessed_name)
-            
+
             # Apply preprocessing to the copy
             if streak_sdevs > 0:
                 RemoveStreaks(preprocessed_image, sigma=streak_sdevs)
@@ -369,7 +368,7 @@ class HessianBlobGUI:
             # Add preprocessed image to current images
             self.current_images[preprocessed_name] = preprocessed_image
             self.update_image_list()
-            
+
             # Display the preprocessed image
             self.current_display_image = preprocessed_image
             self.display_image()
@@ -406,18 +405,18 @@ class HessianBlobGUI:
         folder_frame.pack(fill=tk.X, pady=10)
 
         ttk.Label(folder_frame, text="Output folder:").pack(anchor=tk.W)
-        folder_display = ttk.Label(folder_frame, text="No folder selected", 
-                                  foreground="red", font=('TkDefaultFont', 9))
+        folder_display = ttk.Label(folder_frame, text="No folder selected",
+                                   foreground="red", font=('TkDefaultFont', 9))
         folder_display.pack(anchor=tk.W, pady=2)
-        
+
         def select_folder():
             folder = filedialog.askdirectory(title="Select Output Folder")
             if folder:
                 output_folder[0] = folder
                 folder_display.config(text=folder, foreground="green")
-        
-        ttk.Button(folder_frame, text="Select Output Folder", 
-                  command=select_folder).pack(anchor=tk.W, pady=5)
+
+        ttk.Button(folder_frame, text="Select Output Folder",
+                   command=select_folder).pack(anchor=tk.W, pady=5)
 
         # Parameters frame
         params_frame = ttk.Frame(main_frame)
@@ -485,20 +484,19 @@ class HessianBlobGUI:
                 display_name = name
             self.image_listbox.insert(tk.END, display_name)
 
-
     def update_button_states(self):
         """Update ViewParticles and blob toggle button states"""
         # FIXED: Only enable ViewParticles if we have valid analysis results
-        if (self.current_display_results and 
-            'info' in self.current_display_results and 
-            self.current_display_results['info'] is not None):
-            
+        if (self.current_display_results and
+                'info' in self.current_display_results and
+                self.current_display_results['info'] is not None):
+
             info = self.current_display_results['info']
             blob_count = info.data.shape[0]
-            
+
             # Enable ViewParticles only if we have analysis results (even with 0 blobs)
             self.view_particles_button.configure(state=tk.NORMAL)
-            
+
             # Enable blob toggle only if blobs exist
             if blob_count > 0:
                 self.blob_toggle.configure(state=tk.NORMAL)
@@ -511,8 +509,9 @@ class HessianBlobGUI:
                 self.blob_toggle.configure(state=tk.DISABLED)
                 self.show_blobs = False
                 self.blob_toggle_var.set(False)
-                
-            print(f"Button states updated: ViewParticles={self.view_particles_button['state']}, BlobToggle={self.blob_toggle['state']}, ShowBlobs={self.show_blobs}")
+
+            print(
+                f"Button states updated: ViewParticles={self.view_particles_button['state']}, BlobToggle={self.blob_toggle['state']}, ShowBlobs={self.show_blobs}")
         else:
             # NO valid results - disable both buttons
             self.view_particles_button.configure(state=tk.DISABLED)
@@ -527,7 +526,7 @@ class HessianBlobGUI:
         if selection:
             index = selection[0]
             display_name = self.image_listbox.get(index)
-            
+
             # Extract actual image name from display format "name [X blobs]" or "name"
             if '[' in display_name and ']' in display_name:
                 image_name = display_name.split(' [')[0]
@@ -536,12 +535,12 @@ class HessianBlobGUI:
 
             if image_name in self.current_images:
                 self.current_display_image = self.current_images[image_name]
-                
+
                 # Restore saved analysis results for this image
                 if image_name in self.current_results:
                     self.current_display_results = self.current_results[image_name]
                     print(f"RESTORED analysis results for {image_name}")
-                    
+
                     # Log what we restored
                     if self.current_display_results and 'info' in self.current_display_results:
                         info = self.current_display_results['info']
@@ -551,12 +550,12 @@ class HessianBlobGUI:
                 else:
                     self.current_display_results = None
                     print(f"No saved analysis results for {image_name}")
-                
+
                 # Update display and UI
                 self.display_image()
                 self.update_info_display()
                 self.update_button_states()
-                
+
                 # Log status for user
                 if self.current_display_results and 'info' in self.current_display_results:
                     info = self.current_display_results['info']
@@ -571,7 +570,7 @@ class HessianBlobGUI:
                             self.log_message(f"ViewParticles is ENABLED (shows empty list)")
                 else:
                     self.log_message(f"No analysis results for this image")
-                
+
                 # CRITICAL FIX: Force GUI refresh to ensure button states are updated
                 self.root.update_idletasks()
 
@@ -591,18 +590,21 @@ class HessianBlobGUI:
             self.ax.set_title(f"Image: {self.current_display_image.name}")
 
             # Igor Pro: Add blob overlay if enabled and results exist
-            print(f"DEBUG display_image: show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
+            print(
+                f"DEBUG display_image: show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
             if self.current_display_results:
                 print(f"DEBUG: Results keys: {self.current_display_results.keys()}")
                 if 'info' in self.current_display_results:
                     print(f"DEBUG: Info shape: {self.current_display_results['info'].data.shape}")
-                    print(f"DEBUG: Manual threshold used: {self.current_display_results.get('manual_threshold_used', False)}")
-            
+                    print(
+                        f"DEBUG: Manual threshold used: {self.current_display_results.get('manual_threshold_used', False)}")
+
             if self.show_blobs and self.current_display_results:
                 print("DEBUG: Calling add_blob_overlay")
                 self.add_blob_overlay()
             else:
-                print(f"DEBUG: NOT calling add_blob_overlay - show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
+                print(
+                    f"DEBUG: NOT calling add_blob_overlay - show_blobs={self.show_blobs}, has_results={self.current_display_results is not None}")
 
             self.canvas.draw()
 
@@ -673,14 +675,14 @@ class HessianBlobGUI:
         print(f"=== TOGGLE BLOB DISPLAY DEBUG ===")
         print(f"toggle_blob_display called")
         print(f"blob_toggle_var.get(): {self.blob_toggle_var.get()}")
-        
+
         self.show_blobs = self.blob_toggle_var.get()
         print(f"show_blobs set to: {self.show_blobs}")
-        
+
         self.log_message(f"Blob display: {'ON' if self.show_blobs else 'OFF'}")
         print(f"current_display_results exists: {self.current_display_results is not None}")
         print(f"current_display_image exists: {self.current_display_image is not None}")
-        
+
         if self.current_display_results:
             info = self.current_display_results.get('info')
             if info:
@@ -689,10 +691,10 @@ class HessianBlobGUI:
                 print("No info in current_display_results")
         else:
             print("No current_display_results")
-            
+
         print(f"About to call display_image...")
         print(f"================================")
-        
+
         if self.current_display_image is not None:
             self.display_image()
 
@@ -744,7 +746,7 @@ class HessianBlobGUI:
                 subPixelMult=params['subPixelMult'],
                 allowOverlap=params['allowOverlap']
             )
-            
+
             print(f"=== SINGLE ANALYSIS DEBUG ===")
             print(f"HessianBlobs returned: {type(results)}")
             print(f"Results is truthy: {bool(results)}")
@@ -761,16 +763,16 @@ class HessianBlobGUI:
             else:
                 print("Results is None or empty!")
             print(f"=============================")
-            
+
             if results:
                 # Store results (most recent analysis overwrites previous)
                 image_name = self.current_display_image.name
                 self.current_results[image_name] = results
                 self.current_display_results = results
-                
+
                 threshold_mode = results.get('detHResponseThresh', 'unknown')
                 print(f"Stored results for {image_name}, threshold {threshold_mode}")
-                
+
                 print(f"=== GUI STATE DEBUG ===")
                 print(f"Stored results for image: {image_name}")
                 print(f"current_display_results is not None: {self.current_display_results is not None}")
@@ -782,7 +784,7 @@ class HessianBlobGUI:
                 manual_used = results.get('manual_threshold_used', False)
                 interactive_used = (threshold_mode == -2)
                 manual_value_used = results.get('manual_value_used', False)
-                
+
                 print(f"=== THRESHOLD MODE DEBUG ===")
                 print(f"detHResponseThresh: {threshold_mode}")
                 print(f"Is interactive (-2): {interactive_used}")
@@ -797,7 +799,7 @@ class HessianBlobGUI:
                 print(f"Enabling ViewParticles for ANY analysis result...")
                 self.view_particles_button.configure(state=tk.NORMAL)
                 print(f"ViewParticles button state after enable: {self.view_particles_button['state']}")
-                
+
                 # Enable blob toggle only if blobs found
                 if blob_count > 0:
                     print(f"Enabling blob toggle for {blob_count} blobs...")
@@ -823,10 +825,10 @@ class HessianBlobGUI:
 
                 # Force refresh display to show blobs if enabled
                 self.display_image()
-                
+
                 # CRITICAL FIX: Force complete GUI state refresh
                 self.root.update_idletasks()
-                
+
                 # EXTRA DEBUG: Check button states after interactive threshold
                 if threshold_mode == -2:
                     print(f"=== POST-INTERACTIVE BUTTON CHECK ===")
@@ -834,25 +836,27 @@ class HessianBlobGUI:
                     print(f"Blob toggle state: {self.blob_toggle['state']}")
                     print(f"Button should be enabled for {blob_count} blobs")
                     print(f"=======================================")
-                
+
                 if blob_count > 0:
-                    self.log_message("="*50)
+                    self.log_message("=" * 50)
                     self.log_message("ANALYSIS COMPLETE!")
-                    self.log_message(f"Found {blob_count} blobs - ViewParticles and Show Blob Regions are now AVAILABLE!")
+                    self.log_message(
+                        f"Found {blob_count} blobs - ViewParticles and Show Blob Regions are now AVAILABLE!")
                     self.log_message("You can now:")
                     self.log_message("- Click 'View Particles' to browse detected particles")
                     self.log_message("- Toggle 'Show Blob Regions' to see blob overlays")
-                    self.log_message("="*50)
-                    
+                    self.log_message("=" * 50)
+
                     print(f"=== FINAL STATE CHECK ===")
                     print(f"current_display_results ready: {self.current_display_results is not None}")
-                    print(f"ViewParticles ready: {self.current_display_results is not None and 'info' in self.current_display_results}")
+                    print(
+                        f"ViewParticles ready: {self.current_display_results is not None and 'info' in self.current_display_results}")
                     print(f"Show Blob Regions ready: {self.show_blobs}")
                     print(f"Blob toggle enabled: {self.blob_toggle['state'] == 'normal'}")
                     print(f"=========================")
                 else:
                     self.log_message("Analysis complete - no blobs detected above threshold")
-                    
+
             else:
                 print("ERROR: HessianBlobs returned None or empty results")
                 self.log_message("Analysis failed or was cancelled - please try again")
@@ -872,41 +876,44 @@ class HessianBlobGUI:
             params = GetBlobDetectionParams()
             if params is None:
                 return
-                
+
             # Handle manual threshold for batch analysis
             if params['detHResponseThresh'] == -2:
                 # Get threshold once for all images in batch
                 from main_functions import InteractiveThreshold
-                
+
                 # Use first image to determine threshold
                 first_image = next(iter(self.current_images.values()))
-                
-                # Need to set up detectors for threshold selection  
+
+                # Need to set up detectors for threshold selection
                 from scale_space import ScaleSpaceRepresentation, BlobDetectors
                 from igor_compatibility import DimDelta
                 import numpy as np
-                
+
                 # Create scale-space for first image
                 scaleStart_converted = (params['scaleStart'] * DimDelta(first_image, 0)) ** 2 / 2
-                layers_calculated = np.log((params['layers'] * DimDelta(first_image, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(params['scaleFactor'])
+                layers_calculated = np.log(
+                    (params['layers'] * DimDelta(first_image, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(
+                    params['scaleFactor'])
                 layers = max(1, int(np.ceil(layers_calculated)))
                 igor_scale_start = np.sqrt(params['scaleStart']) / DimDelta(first_image, 0)
-                
+
                 L = ScaleSpaceRepresentation(first_image, layers, igor_scale_start, params['scaleFactor'])
                 if L is None:
                     messagebox.showerror("Error", "Failed to create scale-space for threshold selection")
                     return
-                    
+
                 # FIXED: Get detectors directly from BlobDetectors return instead of using non-existent GetWave
                 detH, LG = BlobDetectors(L, 1)
-                
+
                 if detH is None or LG is None:
                     messagebox.showerror("Error", "Failed to compute detectors for threshold selection")
                     return
-                
-                # Get threshold interactively  
+
+                # Get threshold interactively
                 try:
-                    threshold_result = InteractiveThreshold(first_image, detH, LG, params['particleType'], params['maxCurvatureRatio'])
+                    threshold_result = InteractiveThreshold(first_image, detH, LG, params['particleType'],
+                                                            params['maxCurvatureRatio'])
                     if threshold_result[0] is None:
                         self.log_message("Batch analysis cancelled - no threshold selected")
                         return
@@ -915,7 +922,7 @@ class HessianBlobGUI:
                     import traceback
                     traceback.print_exc()
                     return
-                    
+
                 # Use the selected threshold for all images
                 batch_threshold = threshold_result[0]
                 params['detHResponseThresh'] = batch_threshold
@@ -930,9 +937,9 @@ class HessianBlobGUI:
             print(f"Total images to process: {total_images}")
             print(f"Final threshold mode: {params['detHResponseThresh']}")
             print(f"============================")
-            
+
             for image_name, wave in self.current_images.items():
-                print(f"=== Processing image {processed+1}/{total_images}: {image_name} ===")
+                print(f"=== Processing image {processed + 1}/{total_images}: {image_name} ===")
                 self.log_message(f"Processing {image_name}...")
 
                 try:
@@ -953,7 +960,7 @@ class HessianBlobGUI:
                     if results:
                         # Store results (overwrites any previous analysis for this image)
                         self.current_results[image_name] = results
-                        
+
                         blob_count = results['info'].data.shape[0] if results['info'] else 0
                         threshold_mode = results.get('detHResponseThresh', 'unknown')
                         self.log_message(f"  -> {blob_count} blobs detected (threshold {threshold_mode})")
@@ -970,60 +977,62 @@ class HessianBlobGUI:
             # FIXED: After batch analysis, ensure ALL images show results available
             total_blobs_found = 0
             successful_analyses = 0
-            
+
             # Count total results
             for image_name, results in self.current_results.items():
                 if results and 'info' in results:
                     blob_count = results['info'].data.shape[0] if results['info'] else 0
                     total_blobs_found += blob_count
                     successful_analyses += 1
-            
+
             self.log_message(f"Total blobs found across all images: {total_blobs_found}")
             self.log_message(f"Images with successful analysis: {successful_analyses}")
-            
-            # CRITICAL FIX: Update display for current image AND ensure image list reflects analysis status  
+
+            # CRITICAL FIX: Update display for current image AND ensure image list reflects analysis status
             if self.current_display_image:
                 image_name = self.current_display_image.name
                 if image_name in self.current_results:
                     self.current_display_results = self.current_results[image_name]
-                    
+
                     # CRITICAL FIX: Always enable ViewParticles after analysis, enable blob toggle only if blobs exist
                     info = self.current_display_results['info']
                     blob_count = info.data.shape[0] if info else 0
                 else:
                     self.current_display_results = None
                     blob_count = 0
-                    
+
                     # ALWAYS enable ViewParticles after analysis
                     self.view_particles_button.configure(state=tk.NORMAL)
-                    
+
                     if blob_count > 0:
                         self.blob_toggle.configure(state=tk.NORMAL)
-                        self.log_message(f"Current image '{image_name}': {blob_count} blobs - ViewParticles and Show Blob Regions AVAILABLE")
+                        self.log_message(
+                            f"Current image '{image_name}': {blob_count} blobs - ViewParticles and Show Blob Regions AVAILABLE")
                     else:
                         self.blob_toggle.configure(state=tk.DISABLED)
-                        self.log_message(f"Current image '{image_name}': No blobs detected - ViewParticles AVAILABLE (empty list)")
-                    
+                        self.log_message(
+                            f"Current image '{image_name}': No blobs detected - ViewParticles AVAILABLE (empty list)")
+
                     self.update_info_display()
                     self.display_image()
-                    
+
                     # CRITICAL FIX: Force GUI refresh after batch analysis
                     self.root.update_idletasks()
-            
+
             # CRITICAL FIX: Update the image list to show analysis results
             self.update_image_list()
-            
+
             # CRITICAL FIX: Highlight that users can now browse through all analyzed images
-            self.log_message("="*60)
-            self.log_message("BATCH ANALYSIS COMPLETE!")  
+            self.log_message("=" * 60)
+            self.log_message("BATCH ANALYSIS COMPLETE!")
             self.log_message("You can now:")
             self.log_message("1. Select any image from the list to view its results")
             self.log_message("2. Use 'View Particles' to browse detected particles")
             self.log_message("3. Toggle 'Show Blob Regions' to see overlays")
             self.log_message("4. All analyzed images are available in the image list")
             self.log_message("5. Image list now shows '[X blobs]' for analyzed images")
-            self.log_message("="*60)
-            
+            self.log_message("=" * 60)
+
             # Igor Pro-style save dialog after batch processing
             self.prompt_save_batch_results()
 
@@ -1036,34 +1045,34 @@ class HessianBlobGUI:
         print(f"=== VIEW PARTICLES DEBUG ===")
         print(f"view_particles called")
         print(f"current_display_results is None: {self.current_display_results is None}")
-        
+
         # Check if we have valid analysis results
-        if (self.current_display_results is None or 
-            'info' not in self.current_display_results or 
-            self.current_display_results['info'] is None):
+        if (self.current_display_results is None or
+                'info' not in self.current_display_results or
+                self.current_display_results['info'] is None):
             print("ERROR: No valid analysis results - showing warning")
-            messagebox.showwarning("No Analysis Results", 
-                                 "Please run analysis on this image first.\n\n" +
-                                 "Click 'Single Analysis' to analyze the current image.")
+            messagebox.showwarning("No Analysis Results",
+                                   "Please run analysis on this image first.\n\n" +
+                                   "Click 'Single Analysis' to analyze the current image.")
             return
 
         info = self.current_display_results['info']
         blob_count = info.data.shape[0]
         print(f"info data shape: {info.data.shape}")
         print(f"blob count: {blob_count}")
-            
+
         # Check threshold mode for debugging
         threshold_mode = self.current_display_results.get('detHResponseThresh', 'unknown')
         print(f"Current threshold mode: {threshold_mode}")
-            
+
         if blob_count == 0:
             print("INFO: No particles found - showing empty viewer")
-            messagebox.showinfo("No Particles", 
-                               f"No particles were detected in this analysis.\n\n" +
-                               f"Threshold mode: {threshold_mode}\n" +
-                               f"Try adjusting the analysis parameters or threshold value.")
+            messagebox.showinfo("No Particles",
+                                f"No particles were detected in this analysis.\n\n" +
+                                f"Threshold mode: {threshold_mode}\n" +
+                                f"Try adjusting the analysis parameters or threshold value.")
             return
-            
+
         print(f"ViewParticles should work - launching...")
         print(f"==============================")
 
@@ -1106,139 +1115,199 @@ class HessianBlobGUI:
         """Igor Pro-style save dialog for batch analysis results"""
         if not self.current_results:
             return
-            
+
         # Count total results
         total_images = len(self.current_results)
         total_blobs = sum(
             results['info'].data.shape[0] if results and 'info' in results and results['info'] is not None else 0
             for results in self.current_results.values()
         )
-        
+
         # Create dialog matching Igor Pro style
         dialog = tk.Toplevel(self.root)
         dialog.title("Save Batch Analysis Results")
         dialog.geometry("500x400")
         dialog.resizable(False, False)
         dialog.grab_set()
-        
+
         # Center the dialog
         dialog.transient(self.root)
         dialog.focus_set()
-        
+
         # Main frame
         main_frame = ttk.Frame(dialog, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         # Header info
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        ttk.Label(header_frame, text="Hessian Blob Analysis Results", 
-                 font=('TkDefaultFont', 12, 'bold')).pack(anchor=tk.W)
-        ttk.Label(header_frame, text=f"Processed {total_images} images, found {total_blobs} total blobs").pack(anchor=tk.W)
-        
+
+        ttk.Label(header_frame, text="Hessian Blob Analysis Results",
+                  font=('TkDefaultFont', 12, 'bold')).pack(anchor=tk.W)
+        ttk.Label(header_frame, text=f"Processed {total_images} images, found {total_blobs} total blobs").pack(
+            anchor=tk.W)
+
         # Save options (Igor Pro style)
         options_frame = ttk.LabelFrame(main_frame, text="Save Options", padding="10")
         options_frame.pack(fill=tk.X, pady=(0, 15))
-        
+
         # Variables for save options
         save_vars = {
-            'particle_info': tk.BooleanVar(value=True), 
+            'particle_info': tk.BooleanVar(value=True),
             'scale_space': tk.BooleanVar(value=False),
             'blob_maps': tk.BooleanVar(value=False),
             'summary_report': tk.BooleanVar(value=True),
             'individual_files': tk.BooleanVar(value=False)
         }
-        
+
         # Checkboxes for save options
-        ttk.Checkbutton(options_frame, text="Particle Information (coordinates, sizes, measurements)", 
-                       variable=save_vars['particle_info']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Scale-space representations (detH, LapG)", 
-                       variable=save_vars['scale_space']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Blob detection maps (maxima locations)", 
-                       variable=save_vars['blob_maps']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Analysis summary report", 
-                       variable=save_vars['summary_report']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Save individual files for each image", 
-                       variable=save_vars['individual_files']).pack(anchor=tk.W, pady=2)
-        
+        ttk.Checkbutton(options_frame, text="Particle Information (coordinates, sizes, measurements)",
+                        variable=save_vars['particle_info']).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Scale-space representations (detH, LapG)",
+                        variable=save_vars['scale_space']).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Blob detection maps (maxima locations)",
+                        variable=save_vars['blob_maps']).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Analysis summary report",
+                        variable=save_vars['summary_report']).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Save individual files for each image",
+                        variable=save_vars['individual_files']).pack(anchor=tk.W, pady=2)
+
         # File format selection
         format_frame = ttk.LabelFrame(main_frame, text="Output Format", padding="10")
         format_frame.pack(fill=tk.X, pady=(0, 15))
-        
+
         format_var = tk.StringVar(value="csv")
-        ttk.Radiobutton(format_frame, text="CSV files (Excel compatible)", 
-                       variable=format_var, value="csv").pack(anchor=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="Tab-delimited text files", 
-                       variable=format_var, value="txt").pack(anchor=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="NumPy binary files (.npy)", 
-                       variable=format_var, value="npy").pack(anchor=tk.W, pady=2)
-        
+        ttk.Radiobutton(format_frame, text="CSV files (Excel compatible)",
+                        variable=format_var, value="csv").pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(format_frame, text="Tab-delimited text files",
+                        variable=format_var, value="txt").pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(format_frame, text="NumPy binary files (.npy)",
+                        variable=format_var, value="npy").pack(anchor=tk.W, pady=2)
+
         # Output directory selection
         dir_frame = ttk.LabelFrame(main_frame, text="Output Location", padding="10")
         dir_frame.pack(fill=tk.X, pady=(0, 15))
-        
+
         output_dir = tk.StringVar(value=os.getcwd())
         dir_entry_frame = ttk.Frame(dir_frame)
         dir_entry_frame.pack(fill=tk.X)
-        
+
         ttk.Entry(dir_entry_frame, textvariable=output_dir, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(dir_entry_frame, text="Browse...", 
-                  command=lambda: self.browse_output_directory(output_dir)).pack(side=tk.RIGHT, padx=(5, 0))
-        
+        ttk.Button(dir_entry_frame, text="Browse...",
+                   command=lambda: self.browse_output_directory(output_dir)).pack(side=tk.RIGHT, padx=(5, 0))
+
         # Buttons
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(15, 0))
-        
+
         def save_results():
             """Save the batch results with selected options"""
             if not any(save_vars[key].get() for key in save_vars):
                 messagebox.showwarning("No Options Selected", "Please select at least one save option.")
                 return
-                
+
             try:
-                self.save_batch_results_to_files(output_dir.get(), save_vars, format_var.get())
-                self.log_message("Batch results saved successfully!")
+                # FIXED: Use Igor Pro BatchHessianBlobs format for batch saving
+                batch_results = self.prepare_batch_results_for_save()
+                
+                if batch_results and batch_results['numParticles'] > 0:
+                    from main_functions import SaveBatchResults
+                    SaveBatchResults(batch_results, output_dir.get(), format_var.get())
+                    self.log_message(f"Batch results saved successfully to {output_dir.get()}!")
+                else:
+                    messagebox.showwarning("No Data", "No analysis results to save.")
+                    return
+                    
                 dialog.destroy()
             except Exception as e:
                 messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
-        
+                import traceback
+                print(f"Save error details: {traceback.format_exc()}")
+
         ttk.Button(button_frame, text="Save Results", command=save_results).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
-        
+
         # Wait for dialog to close
         dialog.wait_window()
-    
+
     def browse_output_directory(self, dir_var):
         """Browse for output directory"""
         directory = filedialog.askdirectory(initialdir=dir_var.get())
         if directory:
             dir_var.set(directory)
     
+    def prepare_batch_results_for_save(self):
+        """FIXED: Prepare current analysis results in Igor Pro BatchHessianBlobs format"""
+        if not self.current_results:
+            return None
+            
+        from utilities import Wave
+        import numpy as np
+        
+        # Collect all measurement waves (Igor Pro style concatenation)
+        all_heights_data = []
+        all_volumes_data = []
+        all_areas_data = []
+        all_avg_heights_data = []
+        
+        valid_results = {}
+        
+        for image_name, results in self.current_results.items():
+            if results and 'Heights' in results and results['Heights'] is not None:
+                heights = results['Heights'].data
+                volumes = results['Volumes'].data
+                areas = results['Areas'].data
+                avg_heights = results['AvgHeights'].data
+                
+                if len(heights) > 0:
+                    all_heights_data.extend(heights)
+                    all_volumes_data.extend(volumes)
+                    all_areas_data.extend(areas)
+                    all_avg_heights_data.extend(avg_heights)
+                    valid_results[image_name] = results
+        
+        if not all_heights_data:
+            return None
+            
+        # Create Igor Pro style batch results structure
+        batch_results = {
+            'series_folder': f'BatchAnalysis_{len(valid_results)}Images',
+            'Parameters': Wave(np.array([1, 256, 1.5, -2, 1, 1, 0, -np.inf, np.inf, -np.inf, np.inf, -np.inf, np.inf]), "Parameters"),
+            'AllHeights': Wave(np.array(all_heights_data), "AllHeights"),
+            'AllVolumes': Wave(np.array(all_volumes_data), "AllVolumes"),
+            'AllAreas': Wave(np.array(all_areas_data), "AllAreas"),
+            'AllAvgHeights': Wave(np.array(all_avg_heights_data), "AllAvgHeights"),
+            'numParticles': len(all_heights_data),
+            'numImages': len(valid_results),
+            'image_results': valid_results
+        }
+        
+        return batch_results
+
     def save_batch_results_to_files(self, output_dir, save_vars, file_format):
         """Save batch analysis results to files (Igor Pro compatible format)"""
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        
+
         import datetime
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         # Save particle information (main results)
         if save_vars['particle_info'].get():
             self.save_particle_info(output_dir, file_format, timestamp, save_vars['individual_files'].get())
-        
+
         # Save scale-space data
         if save_vars['scale_space'].get():
             self.save_scale_space_data(output_dir, file_format, timestamp, save_vars['individual_files'].get())
-        
+
         # Save blob detection maps
         if save_vars['blob_maps'].get():
             self.save_blob_maps(output_dir, file_format, timestamp, save_vars['individual_files'].get())
-            
+
         # Save summary report
         if save_vars['summary_report'].get():
             self.save_analysis_summary(output_dir, timestamp)
-    
+
     def save_particle_info(self, output_dir, file_format, timestamp, individual_files):
         """Save particle information data (coordinates, sizes, measurements)"""
         if individual_files:
@@ -1256,18 +1325,18 @@ class HessianBlobGUI:
             filename = f"batch_particles_{timestamp}.{file_format}"
             filepath = os.path.join(output_dir, filename)
             self.save_combined_particle_info(filepath, file_format)
-    
+
     def save_info_data(self, info, filepath, file_format, image_name):
         """Save individual particle info data"""
         data = info.data
-        
+
         # Igor Pro HessianBlobs column headers (matching original implementation)
         headers = [
             'X_Center', 'Y_Center', 'Scale', 'DetH_Response', 'LapG_Response',
             'Eccentricity', 'Orientation', 'Area', 'Mean_Intensity', 'Max_Intensity',
             'Min_Intensity', 'Std_Intensity', 'Integrated_Intensity'
         ]
-        
+
         if file_format == 'csv':
             import csv
             with open(filepath, 'w', newline='') as f:
@@ -1280,7 +1349,7 @@ class HessianBlobGUI:
                 writer.writerow(headers)
                 for row in data:
                     writer.writerow(row)
-        
+
         elif file_format == 'txt':
             with open(filepath, 'w') as f:
                 f.write('# Hessian Blob Analysis Results\n')
@@ -1291,7 +1360,7 @@ class HessianBlobGUI:
                 f.write('\t'.join(headers) + '\n')
                 for row in data:
                     f.write('\t'.join(map(str, row)) + '\n')
-        
+
         elif file_format == 'npy':
             np.save(filepath, data)
             # Also save metadata
@@ -1300,112 +1369,127 @@ class HessianBlobGUI:
                 f.write(f'Image: {image_name}\n')
                 f.write(f'Particles: {data.shape[0]}\n')
                 f.write(f'Columns: {", ".join(headers)}\n')
-    
+
     def save_combined_particle_info(self, filepath, file_format):
-        """Save combined particle info for all images"""
+        """FIXED: Save combined particle info from all images with proper Igor Pro format"""
         all_data = []
-        image_names = []
-        
+        image_labels = []
+
         for image_name, results in self.current_results.items():
             if results and 'info' in results and results['info'] is not None:
                 info = results['info']
+                heights = results.get('Heights')
+                areas = results.get('Areas') 
+                volumes = results.get('Volumes')
+                avg_heights = results.get('AvgHeights')
+                com = results.get('COM')
+                
                 if info.data.shape[0] > 0:
-                    # Add image name column
-                    data_with_image = np.column_stack([
-                        np.full(info.data.shape[0], image_name, dtype=object),
-                        info.data
-                    ])
-                    all_data.append(data_with_image)
-        
+                    # Create combined data with image name and measurements
+                    for i in range(info.data.shape[0]):
+                        row_data = [
+                            image_name,
+                            info.data[i, 0],  # X_Center
+                            info.data[i, 1],  # Y_Center
+                            heights.data[i] if heights and i < len(heights.data) else 0,
+                            areas.data[i] if areas and i < len(areas.data) else 0,
+                            volumes.data[i] if volumes and i < len(volumes.data) else 0,
+                            avg_heights.data[i] if avg_heights and i < len(avg_heights.data) else 0,
+                            com.data[i, 0] if com and i < len(com.data) else info.data[i, 0],
+                            com.data[i, 1] if com and i < len(com.data) else info.data[i, 1],
+                        ]
+                        all_data.append(row_data)
+
         if not all_data:
             return
-            
-        combined_data = np.vstack(all_data)
-        
+
         headers = [
-            'Image_Name', 'X_Center', 'Y_Center', 'Scale', 'DetH_Response', 'LapG_Response',
-            'Eccentricity', 'Orientation', 'Area', 'Mean_Intensity', 'Max_Intensity',
-            'Min_Intensity', 'Std_Intensity', 'Integrated_Intensity'
+            'Image_Name', 'X_Center', 'Y_Center', 'Height', 'Area', 'Volume', 
+            'AvgHeight', 'COM_X', 'COM_Y'
         ]
-        
+
         if file_format == 'csv':
             import csv
             with open(filepath, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['# Hessian Blob Batch Analysis Results'])
                 writer.writerow(['# Total images:', len(self.current_results)])
-                writer.writerow(['# Total particles:', combined_data.shape[0]])
+                writer.writerow(['# Total particles:', len(all_data)])
                 writer.writerow(['# Columns:', ', '.join(headers)])
                 writer.writerow([])
                 writer.writerow(headers)
-                for row in combined_data:
+                for row in all_data:
                     writer.writerow(row)
-        
+
         elif file_format == 'txt':
             with open(filepath, 'w') as f:
                 f.write('# Hessian Blob Batch Analysis Results\n')
-                f.write(f'# Total images: {len(self.current_results)}\n') 
-                f.write(f'# Total particles: {combined_data.shape[0]}\n')
+                f.write(f'# Total images: {len(self.current_results)}\n')
+                f.write(f'# Total particles: {len(all_data)}\n')
                 f.write(f'# Columns: {", ".join(headers)}\n')
                 f.write('\n')
                 f.write('\t'.join(headers) + '\n')
-                for row in combined_data:
+                for row in all_data:
                     f.write('\t'.join(map(str, row)) + '\n')
-        
+
         elif file_format == 'npy':
-            np.save(filepath, combined_data)
-    
+            # Save data and headers separately for NumPy format
+            np.save(filepath, np.array(all_data, dtype=object))
+            metadata_file = filepath.replace('.npy', '_headers.txt')
+            with open(metadata_file, 'w') as f:
+                f.write('\n'.join(headers))
+
     def save_scale_space_data(self, output_dir, file_format, timestamp, individual_files):
         """Save scale-space representation data (detH, LapG)"""
         for image_name, results in self.current_results.items():
             if results and 'detH' in results and 'LG' in results:
                 safe_name = "".join(c for c in image_name if c.isalnum() or c in '._-')
-                
+
                 # Save detH
                 detH_file = f"detH_{safe_name}_{timestamp}.npy"
                 np.save(os.path.join(output_dir, detH_file), results['detH'].data)
-                
-                # Save LapG 
+
+                # Save LapG
                 lapG_file = f"LapG_{safe_name}_{timestamp}.npy"
                 np.save(os.path.join(output_dir, lapG_file), results['LG'].data)
-    
+
     def save_blob_maps(self, output_dir, file_format, timestamp, individual_files):
         """Save blob detection maps (maxima locations)"""
         for image_name, results in self.current_results.items():
             if results and 'SS_MAXMAP' in results and 'SS_MAXSCALEMAP' in results:
                 safe_name = "".join(c for c in image_name if c.isalnum() or c in '._-')
-                
+
                 # Save maxima map
                 maxmap_file = f"maxmap_{safe_name}_{timestamp}.npy"
                 np.save(os.path.join(output_dir, maxmap_file), results['SS_MAXMAP'].data)
-                
+
                 # Save scale map
                 scalemap_file = f"scalemap_{safe_name}_{timestamp}.npy"
                 np.save(os.path.join(output_dir, scalemap_file), results['SS_MAXSCALEMAP'].data)
-    
+
     def save_analysis_summary(self, output_dir, timestamp):
         """Save analysis summary report"""
         filename = f"analysis_summary_{timestamp}.txt"
         filepath = os.path.join(output_dir, filename)
-        
+
         with open(filepath, 'w') as f:
             f.write('Hessian Blob Batch Analysis Summary Report\n')
             f.write('=' * 50 + '\n\n')
             import datetime
             f.write(f'Analysis Date: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
             f.write(f'Total Images Processed: {len(self.current_results)}\n\n')
-            
+
             total_blobs = 0
             for image_name, results in self.current_results.items():
                 if results and 'info' in results and results['info'] is not None:
                     blob_count = results['info'].data.shape[0]
                     total_blobs += blob_count
-                    
+
                     threshold_mode = results.get('detHResponseThresh', 'unknown')
                     f.write(f'{image_name}: {blob_count} blobs (threshold: {threshold_mode})\n')
                 else:
                     f.write(f'{image_name}: No analysis results\n')
-            
+
             f.write(f'\nTotal Blobs Found: {total_blobs}\n')
             f.write(f'Average Blobs per Image: {total_blobs / len(self.current_results):.2f}\n')
 
