@@ -855,6 +855,13 @@ class HessianBlobGUI:
                     print(f"Button should be enabled for {blob_count} blobs")
                     print(f"=======================================")
 
+                # Igor Pro: Automatic save prompt for single image analysis
+                if blob_count > 0:
+                    save_response = messagebox.askyesno("Save Results", 
+                        f"Analysis complete. {blob_count} blobs detected.\n\nSave results to file?")
+                    if save_response:
+                        self.prompt_single_image_save(results, image_name)
+                
                 if blob_count > 0:
                     self.log_message("=" * 50)
                     self.log_message("ANALYSIS COMPLETE!")
@@ -895,56 +902,10 @@ class HessianBlobGUI:
             if params is None:
                 return
 
-            # Handle manual threshold for batch analysis
-            if params['detHResponseThresh'] == -2:
-                # Get threshold once for all images in batch
-                from main_functions import InteractiveThreshold
-
-                # Use first image to determine threshold
-                first_image = next(iter(self.current_images.values()))
-
-                # Need to set up detectors for threshold selection
-                from scale_space import ScaleSpaceRepresentation, BlobDetectors
-                from igor_compatibility import DimDelta
-                import numpy as np
-
-                # Create scale-space for first image
-                scaleStart_converted = (params['scaleStart'] * DimDelta(first_image, 0)) ** 2 / 2
-                layers_calculated = np.log(
-                    (params['layers'] * DimDelta(first_image, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(
-                    params['scaleFactor'])
-                layers = max(1, int(np.ceil(layers_calculated)))
-                igor_scale_start = np.sqrt(params['scaleStart']) / DimDelta(first_image, 0)
-
-                L = ScaleSpaceRepresentation(first_image, layers, igor_scale_start, params['scaleFactor'])
-                if L is None:
-                    messagebox.showerror("Error", "Failed to create scale-space for threshold selection")
-                    return
-
-                # FIXED: Get detectors directly from BlobDetectors return instead of using non-existent GetWave
-                detH, LG = BlobDetectors(L, 1)
-
-                if detH is None or LG is None:
-                    messagebox.showerror("Error", "Failed to compute detectors for threshold selection")
-                    return
-
-                # Get threshold interactively
-                try:
-                    threshold_result = InteractiveThreshold(first_image, detH, LG, params['particleType'],
-                                                            params['maxCurvatureRatio'])
-                    if threshold_result[0] is None:
-                        self.log_message("Batch analysis cancelled - no threshold selected")
-                        return
-                except Exception as e:
-                    self.log_message(f"Error in interactive threshold selection: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    return
-
-                # Use the selected threshold for all images
-                batch_threshold = threshold_result[0]
-                params['detHResponseThresh'] = batch_threshold
-                self.log_message(f"Using threshold {batch_threshold:.6f} for all images in batch")
+            # Igor Pro: Handle interactive threshold mode for batch analysis
+            interactive_mode = (params['detHResponseThresh'] == -2)
+            if interactive_mode:
+                self.log_message("Interactive threshold mode - will prompt for threshold on each image")
 
             total_images = len(self.current_images)
             processed = 0
@@ -961,13 +922,55 @@ class HessianBlobGUI:
                 self.log_message(f"Processing {image_name}...")
 
                 try:
-                    print(f"Calling HessianBlobs with threshold: {params['detHResponseThresh']}")
+                    # Igor Pro: Handle interactive threshold for each image individually
+                    current_threshold = params['detHResponseThresh']
+                    if interactive_mode:
+                        # Show interactive threshold dialog for this specific image
+                        self.log_message(f"Showing interactive threshold dialog for {image_name}...")
+                        from main_functions import InteractiveThreshold
+                        from scale_space import ScaleSpaceRepresentation, BlobDetectors  
+                        from igor_compatibility import DimDelta
+                        import numpy as np
+
+                        # Create scale-space for this image
+                        scaleStart_converted = (params['scaleStart'] * DimDelta(wave, 0)) ** 2 / 2
+                        layers_calculated = np.log(
+                            (params['layers'] * DimDelta(wave, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(
+                            params['scaleFactor'])
+                        layers = max(1, int(np.ceil(layers_calculated)))
+                        igor_scale_start = np.sqrt(params['scaleStart']) / DimDelta(wave, 0)
+
+                        L = ScaleSpaceRepresentation(wave, layers, igor_scale_start, params['scaleFactor'])
+                        if L is None:
+                            self.log_message(f"Failed to create scale-space for {image_name}, skipping...")
+                            continue
+
+                        # Get detectors for this image
+                        detH, LG = BlobDetectors(L, 1)
+                        if detH is None or LG is None:
+                            self.log_message(f"Failed to compute detectors for {image_name}, skipping...")
+                            continue
+
+                        # Get threshold interactively for this image
+                        try:
+                            threshold_result = InteractiveThreshold(wave, detH, LG, params['particleType'],
+                                                                  params['maxCurvatureRatio'])
+                            if threshold_result[0] is None:
+                                self.log_message(f"Threshold selection cancelled for {image_name}, skipping...")
+                                continue
+                            current_threshold = threshold_result[0]
+                            self.log_message(f"Selected threshold {current_threshold:.6f} for {image_name}")
+                        except Exception as e:
+                            self.log_message(f"Error in threshold selection for {image_name}: {e}")
+                            continue
+
+                    print(f"Calling HessianBlobs with threshold: {current_threshold}")
                     results = HessianBlobs(
                         wave,
                         scaleStart=params['scaleStart'],
                         layers=params['layers'],
                         scaleFactor=params['scaleFactor'],
-                        detHResponseThresh=params['detHResponseThresh'],
+                        detHResponseThresh=current_threshold,
                         particleType=params['particleType'],
                         maxCurvatureRatio=params['maxCurvatureRatio'],
                         subPixelMult=params['subPixelMult'],
@@ -1136,44 +1139,51 @@ class HessianBlobGUI:
             self.canvas.draw()
     
     def plot_histogram(self):
-        """Igor Pro: Plot histogram of current display image"""
-        if self.current_display_image is None:
-            messagebox.showwarning("No Image", "Please load an image first.")
+        """Igor Pro: Plot histogram of detected blob sizes (NOT image pixels)"""
+        if self.current_display_results is None or 'info' not in self.current_display_results:
+            messagebox.showwarning("No Analysis", "Please run blob detection first.")
             return
         
         try:
+            # Get blob size data from analysis results
+            info = self.current_display_results['info']
+            if info.data.shape[0] == 0:
+                messagebox.showwarning("No Blobs", "No blobs detected to plot.")
+                return
+            
             import matplotlib.pyplot as plt
             
-            # Get image data and name
-            image_data = self.current_display_image.data
-            image_name = self.current_display_image.name
+            # Extract blob sizes (radius is in column 2)
+            blob_sizes = info.data[:, 2]  # Column 2 = radius
             
             # Create new figure for histogram (Igor Pro style)
             fig, ax = plt.subplots(figsize=(8, 6))
             
-            # Plot histogram with Igor Pro style (50 bins, gray color)
-            ax.hist(image_data.flatten(), bins=50, color='gray', alpha=0.7, edgecolor='black')
+            # Plot histogram with Igor Pro style (15 bins, gray color)
+            n_bins = min(15, max(5, len(blob_sizes) // 3))  # 5-15 bins based on data
+            ax.hist(blob_sizes, bins=n_bins, color='gray', alpha=0.7, edgecolor='black')
             
             # Igor Pro style formatting
-            ax.set_title(f"Histogram - {image_name}", fontsize=12, fontweight='bold')
-            ax.set_xlabel('Pixel Intensity', fontsize=11)
-            ax.set_ylabel('Frequency', fontsize=11)
+            ax.set_title("Histogram - Blob Sizes", fontsize=12, fontweight='bold')
+            ax.set_xlabel('Blob Size (pixels)', fontsize=11)
+            ax.set_ylabel('Count', fontsize=11)
             ax.grid(True, alpha=0.3)
             
             # Add statistics text (Igor Pro style)
-            mean_val = np.mean(image_data)
-            std_val = np.std(image_data)
-            min_val = np.min(image_data)
-            max_val = np.max(image_data)
+            mean_size = np.mean(blob_sizes)
+            std_size = np.std(blob_sizes)
+            min_size = np.min(blob_sizes)
+            max_size = np.max(blob_sizes)
+            total_count = len(blob_sizes)
             
-            stats_text = f'Mean: {mean_val:.3f}\nStd: {std_val:.3f}\nMin: {min_val:.3f}\nMax: {max_val:.3f}'
+            stats_text = f'Mean: {mean_size:.2f}\nStd Dev: {std_size:.2f}\nMin: {min_size:.2f}\nMax: {max_size:.2f}\nTotal: {total_count}'
             ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
             
             plt.tight_layout()
             plt.show()
             
-            self.log_message(f"Histogram plotted for {image_name}")
+            self.log_message(f"Blob size histogram plotted ({total_count} blobs)")
             
         except Exception as e:
             self.log_message(f"Error plotting histogram: {str(e)}")
@@ -1560,6 +1570,87 @@ class HessianBlobGUI:
 
             f.write(f'\nTotal Blobs Found: {total_blobs}\n')
             f.write(f'Average Blobs per Image: {total_blobs / len(self.current_results):.2f}\n')
+
+    def prompt_single_image_save(self, results, image_name):
+        """Igor Pro: Save dialog for single image analysis results"""
+        try:
+            # Create save dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Save Single Image Results")
+            dialog.geometry("500x200")
+            dialog.resizable(False, False)
+            dialog.grab_set()
+            
+            # Center the dialog
+            dialog.transient(self.root)
+            self.root.update_idletasks()
+            x = (self.root.winfo_width() // 2) - (500 // 2) + self.root.winfo_x()
+            y = (self.root.winfo_height() // 2) - (200 // 2) + self.root.winfo_y()
+            dialog.geometry(f"500x200+{x}+{y}")
+            
+            main_frame = ttk.Frame(dialog, padding="15")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            title_label = ttk.Label(main_frame, text=f"Save Results for: {image_name}", 
+                                  font=('TkDefaultFont', 11, 'bold'))
+            title_label.pack(pady=(0, 15))
+            
+            # Output directory selection
+            dir_frame = ttk.Frame(main_frame)
+            dir_frame.pack(fill=tk.X, pady=(0, 10))
+            
+            ttk.Label(dir_frame, text="Output Directory:").pack(anchor=tk.W)
+            
+            dir_select_frame = ttk.Frame(dir_frame)
+            dir_select_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            output_dir = tk.StringVar(value=os.getcwd())
+            dir_entry = ttk.Entry(dir_select_frame, textvariable=output_dir, width=50)
+            dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+            
+            browse_btn = ttk.Button(dir_select_frame, text="Browse...", 
+                                  command=lambda: self.browse_output_directory(output_dir))
+            browse_btn.pack(side=tk.RIGHT)
+            
+            # Format selection
+            format_frame = ttk.Frame(main_frame)
+            format_frame.pack(fill=tk.X, pady=(10, 15))
+            
+            ttk.Label(format_frame, text="Save Format:").pack(anchor=tk.W)
+            format_var = tk.StringVar(value="igor")
+            
+            format_select_frame = ttk.Frame(format_frame)
+            format_select_frame.pack(anchor=tk.W, pady=(5, 0))
+            
+            ttk.Radiobutton(format_select_frame, text="Igor Pro (.csv, .txt, .h5)", 
+                          variable=format_var, value="igor").pack(anchor=tk.W)
+            ttk.Radiobutton(format_select_frame, text="CSV only", 
+                          variable=format_var, value="csv").pack(anchor=tk.W)
+            
+            # Buttons
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(fill=tk.X, pady=(15, 0))
+            
+            def save_results():
+                """Save the single image results"""
+                try:
+                    from main_functions import SaveSingleImageResults
+                    SaveSingleImageResults(results, image_name, output_dir.get(), format_var.get())
+                    self.log_message(f"Single image results saved to {output_dir.get()}!")
+                    dialog.destroy()
+                except Exception as e:
+                    messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
+            
+            ttk.Button(button_frame, text="Save", command=save_results).pack(side=tk.RIGHT, padx=(5, 0))
+            ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
+            
+            # Wait for dialog to close
+            dialog.wait_window()
+            
+        except Exception as e:
+            self.log_message(f"Error in save dialog: {str(e)}")
+            messagebox.showerror("Dialog Error", f"Failed to show save dialog:\n{str(e)}")
 
     def show_about(self):
         """Show about dialog"""
