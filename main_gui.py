@@ -151,6 +151,12 @@ class HessianBlobGUI:
                                                 command=self.view_particles,
                                                 state=tk.DISABLED)
         self.view_particles_button.pack(fill=tk.X, pady=2)
+        
+        # Igor Pro: Plot histogram button (matching Igor Pro)
+        self.plot_histogram_button = ttk.Button(display_frame, text="Plot Histogram",
+                                               command=self.plot_histogram,
+                                               state=tk.DISABLED)
+        self.plot_histogram_button.pack(fill=tk.X, pady=2)
 
         # Results info
         info_frame = ttk.LabelFrame(left_panel, text="Results Info", padding="5")
@@ -485,7 +491,13 @@ class HessianBlobGUI:
             self.image_listbox.insert(tk.END, display_name)
 
     def update_button_states(self):
-        """Update ViewParticles and blob toggle button states"""
+        """Update ViewParticles, histogram, and blob toggle button states"""
+        # Enable histogram button if image is loaded (same logic as Igor Pro)
+        if self.current_display_image is not None:
+            self.plot_histogram_button.configure(state=tk.NORMAL)
+        else:
+            self.plot_histogram_button.configure(state=tk.DISABLED)
+        
         # FIXED: Only enable ViewParticles if we have valid analysis results
         if (self.current_display_results and
                 'info' in self.current_display_results and
@@ -744,7 +756,13 @@ class HessianBlobGUI:
                 particleType=params['particleType'],
                 maxCurvatureRatio=params['maxCurvatureRatio'],
                 subPixelMult=params['subPixelMult'],
-                allowOverlap=params['allowOverlap']
+                allowOverlap=params['allowOverlap'],
+                minH=params.get('minH', float('-inf')),
+                maxH=params.get('maxH', float('inf')),
+                minA=params.get('minA', float('-inf')),
+                maxA=params.get('maxA', float('inf')),
+                minV=params.get('minV', float('-inf')),
+                maxV=params.get('maxV', float('inf'))
             )
 
             print(f"=== SINGLE ANALYSIS DEBUG ===")
@@ -953,7 +971,13 @@ class HessianBlobGUI:
                         particleType=params['particleType'],
                         maxCurvatureRatio=params['maxCurvatureRatio'],
                         subPixelMult=params['subPixelMult'],
-                        allowOverlap=params['allowOverlap']
+                        allowOverlap=params['allowOverlap'],
+                        minH=params.get('minH', float('-inf')),
+                        maxH=params.get('maxH', float('inf')),
+                        minA=params.get('minA', float('-inf')),
+                        maxA=params.get('maxA', float('inf')),
+                        minV=params.get('minV', float('-inf')),
+                        maxV=params.get('maxV', float('inf'))
                     )
                     print(f"HessianBlobs returned: {type(results)}")
 
@@ -1110,6 +1134,50 @@ class HessianBlobGUI:
             self.ax.set_xlim(0, self.current_display_image.data.shape[1])
             self.ax.set_ylim(self.current_display_image.data.shape[0], 0)
             self.canvas.draw()
+    
+    def plot_histogram(self):
+        """Igor Pro: Plot histogram of current display image"""
+        if self.current_display_image is None:
+            messagebox.showwarning("No Image", "Please load an image first.")
+            return
+        
+        try:
+            import matplotlib.pyplot as plt
+            
+            # Get image data and name
+            image_data = self.current_display_image.data
+            image_name = self.current_display_image.name
+            
+            # Create new figure for histogram (Igor Pro style)
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            # Plot histogram with Igor Pro style (50 bins, gray color)
+            ax.hist(image_data.flatten(), bins=50, color='gray', alpha=0.7, edgecolor='black')
+            
+            # Igor Pro style formatting
+            ax.set_title(f"Histogram - {image_name}", fontsize=12, fontweight='bold')
+            ax.set_xlabel('Pixel Intensity', fontsize=11)
+            ax.set_ylabel('Frequency', fontsize=11)
+            ax.grid(True, alpha=0.3)
+            
+            # Add statistics text (Igor Pro style)
+            mean_val = np.mean(image_data)
+            std_val = np.std(image_data)
+            min_val = np.min(image_data)
+            max_val = np.max(image_data)
+            
+            stats_text = f'Mean: {mean_val:.3f}\nStd: {std_val:.3f}\nMin: {min_val:.3f}\nMax: {max_val:.3f}'
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
+                   verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            
+            plt.tight_layout()
+            plt.show()
+            
+            self.log_message(f"Histogram plotted for {image_name}")
+            
+        except Exception as e:
+            self.log_message(f"Error plotting histogram: {str(e)}")
+            messagebox.showerror("Histogram Error", f"Failed to plot histogram:\n{str(e)}")
 
     def prompt_save_batch_results(self):
         """Igor Pro-style save dialog for batch analysis results"""

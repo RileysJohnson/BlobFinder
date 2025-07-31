@@ -302,6 +302,133 @@ def GetBlobDetectionParams():
     ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
 
     dialog.wait_window()
+    
+    # Check if main dialog was cancelled
+    if result[0] is None:
+        return None
+    
+    # IGOR PRO: Add constraint dialog (exact Igor Pro implementation)
+    # Igor Pro: DoAlert 2, "Would you like to limit the analysis to particles of certain height, volume, or area?"
+    try:
+        constraint_response = messagebox.askyesnocancel(
+            "Particle Constraints",
+            "Would you like to limit the analysis to particles of certain height, volume, or area?",
+            icon='question'
+        )
+        
+        # Igor Pro: If(V_flag==1) - Yes was clicked
+        if constraint_response is True:
+            # Create constraints dialog (Igor Pro Figure 16 layout)
+            constraint_dialog = tk.Toplevel()
+            constraint_dialog.title("Constraints")
+            constraint_dialog.geometry("400x300")
+            constraint_dialog.transient()
+            constraint_dialog.grab_set()
+            constraint_dialog.focus_set()
+            
+            constraint_result = [None]
+            
+            constraint_frame = ttk.Frame(constraint_dialog, padding="20")
+            constraint_frame.pack(fill=tk.BOTH, expand=True)
+            
+            ttk.Label(constraint_frame, text="Particle Constraints",
+                      font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
+            
+            # Igor Pro: 2-column layout for min/max pairs
+            params_frame = ttk.Frame(constraint_frame)
+            params_frame.pack(fill=tk.X, pady=10)
+            
+            # Height constraints (Igor Pro: minH, maxH)
+            ttk.Label(params_frame, text="Minimum height").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+            minH_var = tk.StringVar(value="-inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=minH_var, width=15).grid(row=0, column=1, padx=5, pady=5)
+            
+            ttk.Label(params_frame, text="Maximum height").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+            maxH_var = tk.StringVar(value="inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=maxH_var, width=15).grid(row=0, column=3, padx=5, pady=5)
+            
+            # Area constraints (Igor Pro: minA, maxA)
+            ttk.Label(params_frame, text="Minimum area").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+            minA_var = tk.StringVar(value="-inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=minA_var, width=15).grid(row=1, column=1, padx=5, pady=5)
+            
+            ttk.Label(params_frame, text="Maximum area").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
+            maxA_var = tk.StringVar(value="inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=maxA_var, width=15).grid(row=1, column=3, padx=5, pady=5)
+            
+            # Volume constraints (Igor Pro: minV, maxV)
+            ttk.Label(params_frame, text="Minimum volume").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+            minV_var = tk.StringVar(value="-inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=minV_var, width=15).grid(row=2, column=1, padx=5, pady=5)
+            
+            ttk.Label(params_frame, text="Maximum volume").grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
+            maxV_var = tk.StringVar(value="inf")  # Igor Pro default
+            ttk.Entry(params_frame, textvariable=maxV_var, width=15).grid(row=2, column=3, padx=5, pady=5)
+            
+            def parse_constraint_value(value_str):
+                """Parse constraint value, handling 'inf' and '-inf'"""
+                value_str = value_str.strip().lower()
+                if value_str == 'inf' or value_str == '+inf':
+                    return float('inf')
+                elif value_str == '-inf':
+                    return float('-inf')
+                else:
+                    return float(value_str)
+            
+            def constraint_ok_clicked():
+                try:
+                    # Parse all constraint values (Igor Pro variable names)
+                    minH = parse_constraint_value(minH_var.get())
+                    maxH = parse_constraint_value(maxH_var.get())
+                    minA = parse_constraint_value(minA_var.get())
+                    maxA = parse_constraint_value(maxA_var.get())
+                    minV = parse_constraint_value(minV_var.get())
+                    maxV = parse_constraint_value(maxV_var.get())
+                    
+                    # Add constraints to the original result (Igor Pro: 13 parameters)
+                    result[0].update({
+                        'minH': minH, 'maxH': maxH,
+                        'minA': minA, 'maxA': maxA,
+                        'minV': minV, 'maxV': maxV
+                    })
+                    
+                    constraint_result[0] = True
+                    constraint_dialog.destroy()
+                    
+                except ValueError as e:
+                    messagebox.showerror("Invalid Input", f"Please enter valid numeric values or 'inf'/'-inf':\n{str(e)}")
+            
+            def constraint_cancel_clicked():
+                # Igor Pro: If( V_flag == 1) Return ""
+                constraint_result[0] = None
+                constraint_dialog.destroy()
+            
+            # Igor Pro: Continue/Cancel buttons
+            constraint_button_frame = ttk.Frame(constraint_frame)
+            constraint_button_frame.pack(side=tk.BOTTOM, pady=15)
+            
+            ttk.Button(constraint_button_frame, text="Continue", command=constraint_ok_clicked).pack(side=tk.LEFT, padx=5)
+            ttk.Button(constraint_button_frame, text="Cancel", command=constraint_cancel_clicked).pack(side=tk.LEFT, padx=5)
+            
+            constraint_dialog.wait_window()
+            
+            # Check if constraints dialog was cancelled
+            if constraint_result[0] is None:
+                return None  # Igor Pro: Return ""
+                
+        elif constraint_response is None:  # Cancel was clicked on constraint prompt
+            return None
+        else:  # No was clicked - add default constraint values (Igor Pro defaults)
+            result[0].update({
+                'minH': float('-inf'), 'maxH': float('inf'),
+                'minA': float('-inf'), 'maxA': float('inf'),
+                'minV': float('-inf'), 'maxV': float('inf')
+            })
+    
+    except Exception as e:
+        print(f"Error in constraint dialog: {e}")
+        return None
+    
     return result[0]
 
 
