@@ -219,6 +219,11 @@ def GetBlobDetectionParams():
     dialog.transient()
     dialog.grab_set()
     dialog.focus_set()
+    
+    # Make dialog more visible
+    dialog.lift()  # Bring to front
+    dialog.attributes('-topmost', True)  # Keep on top temporarily
+    dialog.after(100, lambda: dialog.attributes('-topmost', False))  # Remove topmost after 100ms
 
     result = [None]
 
@@ -307,23 +312,36 @@ def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     """
     print("Opening interactive threshold window...")
 
-    # Create the threshold selection window
-    threshold_window = ThresholdSelectionWindow(im, detH, LG, particleType, maxCurvatureRatio)
-    threshold_window.run()
+    try:
+        # Create the threshold selection window
+        threshold_window = ThresholdSelectionWindow(im, detH, LG, particleType, maxCurvatureRatio)
+        print("DEBUG: ThresholdSelectionWindow created successfully")
+        
+        threshold_window.run()
+        print("DEBUG: ThresholdSelectionWindow.run() completed")
 
-    print(f"Interactive threshold selected: {threshold_window.result}")
-    
-    # Return both threshold and current blob info for main GUI
-    if threshold_window.result is not None:
-        # Ensure we have blob info
-        if not hasattr(threshold_window, 'current_blob_info') or threshold_window.current_blob_info is None:
-            print("Warning: No blob info from interactive threshold - will recompute")
-            return threshold_window.result, None
+        print(f"Interactive threshold selected: {threshold_window.result}")
+        
+        # Return threshold, blob info, and maps for main GUI
+        if threshold_window.result is not None:
+            # Ensure we have blob info
+            if not hasattr(threshold_window, 'current_blob_info') or threshold_window.current_blob_info is None:
+                print("ERROR: No blob info from interactive threshold - will recompute")
+                return threshold_window.result, None, None, None
+            else:
+                print(f"SUCCESS: Returning interactive blob info with {threshold_window.current_blob_info.data.shape[0]} blobs")
+                # Also return the maps
+                maxmap = getattr(threshold_window, 'current_SS_MAXMAP', None)
+                scalemap = getattr(threshold_window, 'current_SS_MAXSCALEMAP', None)
+                return threshold_window.result, threshold_window.current_blob_info, maxmap, scalemap
         else:
-            print(f"Returning interactive blob info with {threshold_window.current_blob_info.data.shape[0]} blobs")
-            return threshold_window.result, threshold_window.current_blob_info
-    else:
-        return None, None
+            print("ERROR: Interactive threshold was cancelled or failed")
+            return None, None, None, None
+    except Exception as e:
+        print(f"ERROR in InteractiveThreshold: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None, None
 
 
 class ThresholdSelectionWindow:
@@ -531,6 +549,17 @@ class ThresholdSelectionWindow:
         thresh_squared = self.current_thresh * self.current_thresh
         info = ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, thresh_squared)
 
+        # CRITICAL FIX: Calculate particle measurements for interactive threshold
+        if info.data.shape[0] > 0:
+            try:
+                from particle_measurements import MeasureParticles
+                MeasureParticles(self.im, info)
+                print(f"DEBUG: Calculated measurements for {info.data.shape[0]} interactive blobs")
+            except Exception as e:
+                print(f"ERROR in MeasureParticles for interactive threshold: {e}")
+                import traceback
+                traceback.print_exc()
+
         # Show blob circles (like Igor Pro preview)
         if info.data.shape[0] > 0:
             for i in range(info.data.shape[0]):
@@ -549,8 +578,10 @@ class ThresholdSelectionWindow:
         blob_count = info.data.shape[0] if info.data.shape[0] > 0 else 0
         self.blob_count_label.config(text=f"Blobs: {blob_count}")
 
-        # Store the current blob info for access by main GUI
+        # Store the current blob info and maps for access by main GUI
         self.current_blob_info = info
+        self.current_SS_MAXMAP = SS_MAXMAP
+        self.current_SS_MAXSCALEMAP = SS_MAXSCALEMAP
 
         self.canvas.draw()
 
@@ -582,11 +613,38 @@ class ThresholdSelectionWindow:
 
     def accept_threshold(self):
         """Accept the current threshold and close"""
-        self.result = self.current_thresh
-        # Make sure we have the latest blob info
-        if not hasattr(self, 'current_blob_info') or self.current_blob_info is None:
-            self.update_display()  # Force update to get blob info
-        self.root.destroy()
+        try:
+            self.result = self.current_thresh
+            # Make sure we have the latest blob info
+            if not hasattr(self, 'current_blob_info') or self.current_blob_info is None:
+                print("DEBUG: Forcing update_display to get blob info")
+                self.update_display()  # Force update to get blob info
+                
+            # Store maps for later retrieval (simple approach since RegisterWave doesn't exist)
+            if hasattr(self, 'current_SS_MAXMAP') and self.current_SS_MAXMAP is not None:
+                print("DEBUG: SS_MAXMAP available from interactive threshold")
+                
+            if hasattr(self, 'current_SS_MAXSCALEMAP') and self.current_SS_MAXSCALEMAP is not None:
+                print("DEBUG: SS_MAXSCALEMAP available from interactive threshold")
+                
+            print(f"=== ACCEPT THRESHOLD DEBUG ===")
+            print(f"Accepting threshold: {self.result}")
+            print(f"Blob info exists: {self.current_blob_info is not None}")
+            if self.current_blob_info:
+                print(f"Blob info shape: {self.current_blob_info.data.shape}")
+            print(f"===============================")
+            print("DEBUG: About to destroy root window...")
+            self.root.destroy()
+            print("DEBUG: Root window destroyed successfully")
+        except Exception as e:
+            print(f"ERROR in accept_threshold: {e}")
+            import traceback
+            traceback.print_exc()
+            self.result = None
+            try:
+                self.root.destroy()
+            except:
+                pass
 
     def cancel_threshold(self):
         """Cancel threshold selection"""
@@ -643,11 +701,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
 
     # STEP 2: Compute blob detectors (like Igor Pro)
     print("Computing blob detectors...")
-    BlobDetectors(L, 1)  # gammaNorm = 1 as per Igor Pro default
-
-    # Get the computed detector waves
-    detH = GetWave("detH")
-    LG = GetWave("LapG")
+    detH, LG = BlobDetectors(L, 1)  # gammaNorm = 1 as per Igor Pro default
 
     if detH is None or LG is None:
         print("Failed to compute blob detectors")
@@ -657,17 +711,49 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     minResponse = detHResponseThresh
 
     interactive_blob_info = None
+    interactive_SS_MAXMAP = None
+    interactive_SS_MAXSCALEMAP = None
     
     if detHResponseThresh == -2:  # Interactive threshold
-        threshold_result = InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio)
-        if threshold_result[0] is None:
-            print("Threshold selection cancelled")
+        print("=== INTERACTIVE THRESHOLD DEBUG ===")
+        print("detHResponseThresh is -2 - calling InteractiveThreshold...")
+        try:
+            threshold_result = InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio)
+            print(f"InteractiveThreshold returned: {threshold_result}")
+            print(f"Threshold result type: {type(threshold_result)}")
+            print(f"Threshold result length: {len(threshold_result) if threshold_result else 'None'}")
+        except Exception as e:
+            print(f"ERROR in InteractiveThreshold: {e}")
+            import traceback
+            traceback.print_exc()
             return None
-        threshold, interactive_blob_info = threshold_result
-        minResponse = threshold
-        print(f"DEBUG: Got threshold={threshold}, blob_info type={type(interactive_blob_info)}")
-        if interactive_blob_info is not None:
-            print(f"DEBUG: Interactive blob info has {interactive_blob_info.data.shape[0]} blobs")
+            
+        if threshold_result[0] is None:
+            print("WARNING: Interactive threshold cancelled - using automatic fallback")
+            # CRITICAL FIX: Use Otsu threshold as fallback instead of failing
+            print("Falling back to Otsu threshold...")
+            threshold = igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio)
+            minResponse = threshold
+            interactive_blob_info = None
+            interactive_SS_MAXMAP = None
+            interactive_SS_MAXSCALEMAP = None
+            print(f"Fallback Otsu threshold: {threshold}")
+        else:
+            try:
+                threshold, interactive_blob_info, interactive_SS_MAXMAP, interactive_SS_MAXSCALEMAP = threshold_result
+                minResponse = threshold
+                print(f"Successfully unpacked threshold result")
+                print(f"Got threshold={threshold}, blob_info type={type(interactive_blob_info)}")
+                if interactive_blob_info is not None:
+                    print(f"Interactive blob info has {interactive_blob_info.data.shape[0]} blobs")
+                else:
+                    print("WARNING: Interactive blob info is None - will recompute")
+                print(f"SS_MAXMAP type: {type(interactive_SS_MAXMAP)}")
+                print(f"SS_MAXSCALEMAP type: {type(interactive_SS_MAXSCALEMAP)}")
+            except ValueError as e:
+                print(f"ERROR unpacking threshold_result: {e}")
+                print(f"threshold_result contents: {threshold_result}")
+                return None
     elif detHResponseThresh == -1:  # Otsu's method - FIXED to match Igor Pro exactly
         print("Calculating Otsu's Threshold (Igor Pro method)...")
         threshold = igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio)
@@ -699,42 +785,46 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
 
     # Use interactive blob info if available, otherwise compute fresh
     if detHResponseThresh == -2 and interactive_blob_info is not None:
-        print(f"DEBUG: Using interactive blob info with {interactive_blob_info.data.shape[0]} blobs")
+        print(f"Using interactive blob info with {interactive_blob_info.data.shape[0]} blobs")
         info = interactive_blob_info
-        # Still need the maps for completeness
-        SS_MAXMAP = Duplicate(im, "SS_MAXMAP")
-        SS_MAXMAP.data = np.full(im.data.shape, -1.0)
-        SS_MAXSCALEMAP = Duplicate(SS_MAXMAP, "SS_MAXSCALEMAP")
+        
+        # CRITICAL FIX: Use the maps from the interactive threshold window
+        if interactive_SS_MAXMAP is not None and interactive_SS_MAXSCALEMAP is not None:
+            SS_MAXMAP = interactive_SS_MAXMAP
+            SS_MAXSCALEMAP = interactive_SS_MAXSCALEMAP
+            print("Using maps from interactive threshold")
+        else:
+            print("WARNING: Maps not available from interactive threshold, creating defaults")
+            # Create default maps as fallback
+            SS_MAXMAP = Duplicate(im, "SS_MAXMAP")
+            SS_MAXMAP.data = np.full(im.data.shape, -1.0)
+            SS_MAXSCALEMAP = Duplicate(SS_MAXMAP, "SS_MAXSCALEMAP")
     else:
-        print("DEBUG: Computing fresh blob info")
+        print("Computing fresh blob info")
         # Find local maxima
         SS_MAXMAP = Duplicate(im, "SS_MAXMAP")
         SS_MAXMAP.data = np.full(im.data.shape, -1.0)
         SS_MAXSCALEMAP = Duplicate(SS_MAXMAP, "SS_MAXSCALEMAP")
 
-        print(f"DEBUG: Computing maxes with threshold {minResponse}")
         maxes_wave = Maxes(detH, LG, particleType, maxCurvatureRatio,
                            map_wave=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
 
         # Extract blob information
-        print(f"DEBUG: Extracting blobs with squared threshold {minResponse_squared}")
         info = ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, minResponse_squared, subPixelMult, allowOverlap)
-    
-    print(f"DEBUG: Final blob count: {info.data.shape[0]}")
-
-    # Store results in global variables for access
-    RegisterWave(SS_MAXMAP, "SS_MAXMAP")
-    RegisterWave(SS_MAXSCALEMAP, "SS_MAXSCALEMAP")
-    RegisterWave(info, "info")
 
     print(f"Hessian blob detection complete. Found {info.data.shape[0]} blobs.")
     
-    # Calculate particle measurements (height, volume, area, etc.)
+    # CRITICAL FIX: Always ensure measurements are calculated
     if info.data.shape[0] > 0:
         from particle_measurements import MeasureParticles
         MeasureParticles(im, info)
         print(f"Calculated measurements for {info.data.shape[0]} particles")
 
+    print(f"=== HESSIAN BLOBS FINAL RETURN ===")
+    print(f"About to return results with {info.data.shape[0]} blobs")
+    print(f"Results keys will be: info, SS_MAXMAP, SS_MAXSCALEMAP, detH, LG, threshold, etc.")
+    print(f"==================================")
+    
     return {
         'info': info,
         'SS_MAXMAP': SS_MAXMAP,

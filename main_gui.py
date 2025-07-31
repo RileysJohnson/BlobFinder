@@ -47,7 +47,7 @@ class HessianBlobGUI:
 
         # Current state
         self.current_images = {}  # Dict of filename -> Wave
-        self.current_results = {}  # Dict of analysis results
+        self.current_results = {}  # Dict of image_name -> results (most recent analysis)
         self.current_display_image = None
         self.current_display_results = None
         self.figure = None
@@ -147,8 +147,11 @@ class HessianBlobGUI:
         self.blob_toggle.pack(anchor=tk.W, pady=2)
 
         # Igor Pro: View particles button (matching Igor Pro)
-        ttk.Button(display_frame, text="View Particles",
-                   command=self.view_particles).pack(fill=tk.X, pady=2)
+        self.view_particles_button = ttk.Button(display_frame, text="View Particles",
+                                               command=self.view_particles,
+                                               state=tk.DISABLED)
+        self.view_particles_button.pack(fill=tk.X, pady=2)
+        
 
         # Results info
         info_frame = ttk.LabelFrame(left_panel, text="Results Info", padding="5")
@@ -467,38 +470,81 @@ class HessianBlobGUI:
             messagebox.showerror("Error", f"Error in batch preprocessing: {str(e)}")
 
     def update_image_list(self):
-        """Update the image list display"""
+        """FIXED: Update the image list display with analysis status indicators"""
         self.image_listbox.delete(0, tk.END)
         for name in self.current_images.keys():
-            self.image_listbox.insert(tk.END, name)
+            # Check if this image has analysis results
+            if name in self.current_results:
+                results = self.current_results[name]
+                if results and 'info' in results and results['info'].data.shape[0] > 0:
+                    blob_count = results['info'].data.shape[0]
+                    display_name = f"{name} [{blob_count} blobs]"
+                else:
+                    display_name = f"{name} [analyzed, 0 blobs]"
+            else:
+                display_name = name
+            self.image_listbox.insert(tk.END, display_name)
 
-    def on_image_select(self, event):
-        """Handle image selection from list"""
-        selection = self.image_listbox.curselection()
-        if selection:
-            index = selection[0]
-            image_name = self.image_listbox.get(index)
 
-            if image_name in self.current_images:
-                self.current_display_image = self.current_images[image_name]
-                self.current_display_results = self.current_results.get(image_name, None)
-                self.display_image()
-                self.update_info_display()
-
-                # FIXED: Enable blob toggle if results exist for ANY threshold mode
-                if self.current_display_results and 'info' in self.current_display_results:
-                    info = self.current_display_results['info']
-                    if info is not None and info.data.shape[0] > 0:
-                        self.blob_toggle.configure(state=tk.NORMAL)
-                        print(f"DEBUG: Enabled blob toggle for {info.data.shape[0]} blobs")
-                    else:
-                        self.blob_toggle.configure(state=tk.DISABLED)
-                        self.show_blobs = False
-                        self.blob_toggle_var.set(False)
+    def update_button_states(self):
+        """Update ViewParticles and blob toggle button states"""
+        if self.current_display_results and 'info' in self.current_display_results:
+            info = self.current_display_results['info']
+            if info is not None:
+                blob_count = info.data.shape[0]
+                
+                # ALWAYS enable ViewParticles after analysis (even with 0 blobs)
+                self.view_particles_button.configure(state=tk.NORMAL)
+                
+                # Enable blob toggle only if blobs exist
+                if blob_count > 0:
+                    self.blob_toggle.configure(state=tk.NORMAL)
                 else:
                     self.blob_toggle.configure(state=tk.DISABLED)
                     self.show_blobs = False
                     self.blob_toggle_var.set(False)
+            else:
+                self.view_particles_button.configure(state=tk.DISABLED)
+                self.blob_toggle.configure(state=tk.DISABLED)
+        else:
+            self.view_particles_button.configure(state=tk.DISABLED)
+            self.blob_toggle.configure(state=tk.DISABLED)
+
+    def on_image_select(self, event):
+        """FIXED: Handle image selection from list with analysis status"""
+        selection = self.image_listbox.curselection()
+        if selection:
+            index = selection[0]
+            display_name = self.image_listbox.get(index)
+            
+            # Extract actual image name from display format "name [X blobs]" or "name"
+            if '[' in display_name and ']' in display_name:
+                image_name = display_name.split(' [')[0]
+            else:
+                image_name = display_name
+
+            if image_name in self.current_images:
+                self.current_display_image = self.current_images[image_name]
+                self.current_display_results = self.current_results.get(image_name, None)
+                
+                self.display_image()
+                self.update_info_display()
+
+                # Update button states using centralized method
+                self.update_button_states()
+                
+                # Log status
+                if self.current_display_results and 'info' in self.current_display_results:
+                    info = self.current_display_results['info']
+                    if info is not None:
+                        blob_count = info.data.shape[0]
+                        if blob_count > 0:
+                            self.log_message(f"ViewParticles and Show Blob Regions are now ENABLED for {blob_count} blobs")
+                        else:
+                            self.log_message(f"ViewParticles is ENABLED (shows empty list)")
+                
+                # CRITICAL FIX: Force GUI refresh to ensure button states are updated
+                self.root.update_idletasks()
 
     def display_image(self):
         """Display the currently selected image"""
@@ -595,10 +641,29 @@ class HessianBlobGUI:
 
     def toggle_blob_display(self):
         """FIXED: Toggle blob overlay display"""
+        print(f"=== TOGGLE BLOB DISPLAY DEBUG ===")
+        print(f"toggle_blob_display called")
+        print(f"blob_toggle_var.get(): {self.blob_toggle_var.get()}")
+        
         self.show_blobs = self.blob_toggle_var.get()
+        print(f"show_blobs set to: {self.show_blobs}")
+        
         self.log_message(f"Blob display: {'ON' if self.show_blobs else 'OFF'}")
-        print(f"DEBUG: Toggle blob display called, show_blobs={self.show_blobs}")
-        print(f"DEBUG: Current display results exist: {self.current_display_results is not None}")
+        print(f"current_display_results exists: {self.current_display_results is not None}")
+        print(f"current_display_image exists: {self.current_display_image is not None}")
+        
+        if self.current_display_results:
+            info = self.current_display_results.get('info')
+            if info:
+                print(f"Info available with {info.data.shape[0]} blobs")
+            else:
+                print("No info in current_display_results")
+        else:
+            print("No current_display_results")
+            
+        print(f"About to call display_image...")
+        print(f"================================")
+        
         if self.current_display_image is not None:
             self.display_image()
 
@@ -650,37 +715,118 @@ class HessianBlobGUI:
                 subPixelMult=params['subPixelMult'],
                 allowOverlap=params['allowOverlap']
             )
-
+            
+            print(f"=== SINGLE ANALYSIS DEBUG ===")
+            print(f"HessianBlobs returned: {type(results)}")
+            print(f"Results is truthy: {bool(results)}")
             if results:
-                # Store results
+                print(f"Results keys: {list(results.keys())}")
+                info = results.get('info')
+                print(f"Info exists: {info is not None}")
+                if info:
+                    print(f"Info data shape: {info.data.shape}")
+                    print(f"Blob count: {info.data.shape[0]}")
+                    print(f"Info has measurements (>=11 cols): {info.data.shape[1] >= 11}")
+                print(f"Has SS_MAXMAP: {'SS_MAXMAP' in results}")
+                print(f"Has SS_MAXSCALEMAP: {'SS_MAXSCALEMAP' in results}")
+            else:
+                print("Results is None or empty!")
+            print(f"=============================")
+            
+            if results:
+                # Store results (most recent analysis overwrites previous)
                 image_name = self.current_display_image.name
                 self.current_results[image_name] = results
                 self.current_display_results = results
+                
+                threshold_mode = results.get('detHResponseThresh', 'unknown')
+                print(f"Stored results for {image_name}, threshold {threshold_mode}")
+                
+                print(f"=== GUI STATE DEBUG ===")
+                print(f"Stored results for image: {image_name}")
+                print(f"current_display_results is not None: {self.current_display_results is not None}")
+                print(f"current_results keys: {list(self.current_results.keys())}")
 
                 blob_count = results['info'].data.shape[0] if results['info'] else 0
+                print(f"Blob count: {blob_count}")
                 threshold_mode = results.get('detHResponseThresh', 'unknown')
                 manual_used = results.get('manual_threshold_used', False)
+                interactive_used = (threshold_mode == -2)
+                manual_value_used = results.get('manual_value_used', False)
+                
+                print(f"=== THRESHOLD MODE DEBUG ===")
+                print(f"detHResponseThresh: {threshold_mode}")
+                print(f"Is interactive (-2): {interactive_used}")
+                print(f"manual_threshold_used flag: {manual_used}")
+                print(f"manual_value_used flag: {manual_value_used}")
+                print(f"==========================")
 
                 self.log_message(f"Analysis complete: {blob_count} blobs detected")
                 self.log_message(f"Threshold mode: {threshold_mode} (manual={manual_used})")
 
-                # FIXED: Enable blob toggle for ALL threshold modes
-                self.blob_toggle.configure(state=tk.NORMAL)
+                # FIXED: Enable ViewParticles for ALL threshold modes (regardless of blob count)
+                print(f"Enabling ViewParticles for ANY analysis result...")
+                self.view_particles_button.configure(state=tk.NORMAL)
+                print(f"ViewParticles button state after enable: {self.view_particles_button['state']}")
+                
+                # Enable blob toggle only if blobs found
+                if blob_count > 0:
+                    print(f"Enabling blob toggle for {blob_count} blobs...")
+                    self.blob_toggle.configure(state=tk.NORMAL)
+                    print(f"Blob toggle state after enable: {self.blob_toggle['state']}")
+                else:
+                    print(f"Keeping blob toggle disabled - no blobs found")
+                    self.blob_toggle.configure(state=tk.DISABLED)
 
                 # FIXED: Auto-enable blob display for ALL modes with detected blobs
                 if blob_count > 0:
+                    print(f"Auto-enabling blob display for {blob_count} blobs...")
                     self.blob_toggle_var.set(True)
                     self.show_blobs = True
+                    print(f"show_blobs set to: {self.show_blobs}")
+                    print(f"blob_toggle_var set to: {self.blob_toggle_var.get()}")
                     self.log_message("Show Blob Regions enabled automatically")
-                    print(f"DEBUG: Auto-enabled blob display for {blob_count} blobs")
 
-                # Update displays
+                # Update displays and image list
                 self.update_info_display()
+                self.update_image_list()  # FIXED: Update image list to show analysis status
+                self.update_button_states()  # Update button states
 
                 # Force refresh display to show blobs if enabled
                 self.display_image()
+                
+                # CRITICAL FIX: Force complete GUI state refresh
+                self.root.update_idletasks()
+                
+                # EXTRA DEBUG: Check button states after interactive threshold
+                if threshold_mode == -2:
+                    print(f"=== POST-INTERACTIVE BUTTON CHECK ===")
+                    print(f"ViewParticles button state: {self.view_particles_button['state']}")
+                    print(f"Blob toggle state: {self.blob_toggle['state']}")
+                    print(f"Button should be enabled for {blob_count} blobs")
+                    print(f"=======================================")
+                
+                if blob_count > 0:
+                    self.log_message("="*50)
+                    self.log_message("ANALYSIS COMPLETE!")
+                    self.log_message(f"Found {blob_count} blobs - ViewParticles and Show Blob Regions are now AVAILABLE!")
+                    self.log_message("You can now:")
+                    self.log_message("- Click 'View Particles' to browse detected particles")
+                    self.log_message("- Toggle 'Show Blob Regions' to see blob overlays")
+                    self.log_message("="*50)
+                    
+                    print(f"=== FINAL STATE CHECK ===")
+                    print(f"current_display_results ready: {self.current_display_results is not None}")
+                    print(f"ViewParticles ready: {self.current_display_results is not None and 'info' in self.current_display_results}")
+                    print(f"Show Blob Regions ready: {self.show_blobs}")
+                    print(f"Blob toggle enabled: {self.blob_toggle['state'] == 'normal'}")
+                    print(f"=========================")
+                else:
+                    self.log_message("Analysis complete - no blobs detected above threshold")
+                    
             else:
-                self.log_message("Analysis failed or was cancelled")
+                print("ERROR: HessianBlobs returned None or empty results")
+                self.log_message("Analysis failed or was cancelled - please try again")
 
         except Exception as e:
             self.log_message(f"Error in analysis: {str(e)}")
@@ -697,16 +843,71 @@ class HessianBlobGUI:
             params = GetBlobDetectionParams()
             if params is None:
                 return
+                
+            # Handle manual threshold for batch analysis
+            if params['detHResponseThresh'] == -2:
+                # Get threshold once for all images in batch
+                from main_functions import InteractiveThreshold
+                
+                # Use first image to determine threshold
+                first_image = next(iter(self.current_images.values()))
+                
+                # Need to set up detectors for threshold selection  
+                from scale_space import ScaleSpaceRepresentation, BlobDetectors
+                from igor_compatibility import DimDelta
+                import numpy as np
+                
+                # Create scale-space for first image
+                scaleStart_converted = (params['scaleStart'] * DimDelta(first_image, 0)) ** 2 / 2
+                layers_calculated = np.log((params['layers'] * DimDelta(first_image, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(params['scaleFactor'])
+                layers = max(1, int(np.ceil(layers_calculated)))
+                igor_scale_start = np.sqrt(params['scaleStart']) / DimDelta(first_image, 0)
+                
+                L = ScaleSpaceRepresentation(first_image, layers, igor_scale_start, params['scaleFactor'])
+                if L is None:
+                    messagebox.showerror("Error", "Failed to create scale-space for threshold selection")
+                    return
+                    
+                # FIXED: Get detectors directly from BlobDetectors return instead of using non-existent GetWave
+                detH, LG = BlobDetectors(L, 1)
+                
+                if detH is None or LG is None:
+                    messagebox.showerror("Error", "Failed to compute detectors for threshold selection")
+                    return
+                
+                # Get threshold interactively  
+                try:
+                    threshold_result = InteractiveThreshold(first_image, detH, LG, params['particleType'], params['maxCurvatureRatio'])
+                    if threshold_result[0] is None:
+                        self.log_message("Batch analysis cancelled - no threshold selected")
+                        return
+                except Exception as e:
+                    self.log_message(f"Error in interactive threshold selection: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return
+                    
+                # Use the selected threshold for all images
+                batch_threshold = threshold_result[0]
+                params['detHResponseThresh'] = batch_threshold
+                self.log_message(f"Using threshold {batch_threshold:.6f} for all images in batch")
 
             total_images = len(self.current_images)
             processed = 0
 
             self.log_message(f"Starting batch analysis of {total_images} images...")
 
+            print(f"=== BATCH ANALYSIS DEBUG ===")
+            print(f"Total images to process: {total_images}")
+            print(f"Final threshold mode: {params['detHResponseThresh']}")
+            print(f"============================")
+            
             for image_name, wave in self.current_images.items():
+                print(f"=== Processing image {processed+1}/{total_images}: {image_name} ===")
                 self.log_message(f"Processing {image_name}...")
 
                 try:
+                    print(f"Calling HessianBlobs with threshold: {params['detHResponseThresh']}")
                     results = HessianBlobs(
                         wave,
                         scaleStart=params['scaleStart'],
@@ -718,11 +919,15 @@ class HessianBlobGUI:
                         subPixelMult=params['subPixelMult'],
                         allowOverlap=params['allowOverlap']
                     )
+                    print(f"HessianBlobs returned: {type(results)}")
 
                     if results:
+                        # Store results (overwrites any previous analysis for this image)
                         self.current_results[image_name] = results
+                        
                         blob_count = results['info'].data.shape[0] if results['info'] else 0
-                        self.log_message(f"  -> {blob_count} blobs detected")
+                        threshold_mode = results.get('detHResponseThresh', 'unknown')
+                        self.log_message(f"  -> {blob_count} blobs detected (threshold {threshold_mode})")
                     else:
                         self.log_message(f"  -> Analysis failed")
 
@@ -733,14 +938,62 @@ class HessianBlobGUI:
 
             self.log_message(f"Batch analysis complete: {processed}/{total_images} images processed")
 
-            # Update display if current image has new results
+            # FIXED: After batch analysis, ensure ALL images show results available
+            total_blobs_found = 0
+            successful_analyses = 0
+            
+            # Count total results
+            for image_name, results in self.current_results.items():
+                if results and 'info' in results:
+                    blob_count = results['info'].data.shape[0] if results['info'] else 0
+                    total_blobs_found += blob_count
+                    successful_analyses += 1
+            
+            self.log_message(f"Total blobs found across all images: {total_blobs_found}")
+            self.log_message(f"Images with successful analysis: {successful_analyses}")
+            
+            # CRITICAL FIX: Update display for current image AND ensure image list reflects analysis status  
             if self.current_display_image:
                 image_name = self.current_display_image.name
                 if image_name in self.current_results:
                     self.current_display_results = self.current_results[image_name]
-                    self.blob_toggle.configure(state=tk.NORMAL)
+                    
+                    # CRITICAL FIX: Always enable ViewParticles after analysis, enable blob toggle only if blobs exist
+                    info = self.current_display_results['info']
+                    blob_count = info.data.shape[0] if info else 0
+                else:
+                    self.current_display_results = None
+                    blob_count = 0
+                    
+                    # ALWAYS enable ViewParticles after analysis
+                    self.view_particles_button.configure(state=tk.NORMAL)
+                    
+                    if blob_count > 0:
+                        self.blob_toggle.configure(state=tk.NORMAL)
+                        self.log_message(f"Current image '{image_name}': {blob_count} blobs - ViewParticles and Show Blob Regions AVAILABLE")
+                    else:
+                        self.blob_toggle.configure(state=tk.DISABLED)
+                        self.log_message(f"Current image '{image_name}': No blobs detected - ViewParticles AVAILABLE (empty list)")
+                    
                     self.update_info_display()
                     self.display_image()
+                    
+                    # CRITICAL FIX: Force GUI refresh after batch analysis
+                    self.root.update_idletasks()
+            
+            # CRITICAL FIX: Update the image list to show analysis results
+            self.update_image_list()
+            
+            # CRITICAL FIX: Highlight that users can now browse through all analyzed images
+            self.log_message("="*60)
+            self.log_message("BATCH ANALYSIS COMPLETE!")  
+            self.log_message("You can now:")
+            self.log_message("1. Select any image from the list to view its results")
+            self.log_message("2. Use 'View Particles' to browse detected particles")
+            self.log_message("3. Toggle 'Show Blob Regions' to see overlays")
+            self.log_message("4. All analyzed images are available in the image list")
+            self.log_message("5. Image list now shows '[X blobs]' for analyzed images")
+            self.log_message("="*60)
 
         except Exception as e:
             self.log_message(f"Error in batch analysis: {str(e)}")
@@ -748,19 +1001,39 @@ class HessianBlobGUI:
 
     def view_particles(self):
         """FIXED: Launch particle viewer for current results - works for ALL threshold modes"""
+        print(f"=== VIEW PARTICLES DEBUG ===")
+        print(f"view_particles called")
+        print(f"current_display_results is None: {self.current_display_results is None}")
+        
         if self.current_display_results is None:
+            print("ERROR: current_display_results is None - showing warning")
             messagebox.showwarning("No Results", "Please run analysis first.")
             return
 
+        print(f"current_display_results keys: {list(self.current_display_results.keys())}")
         info = self.current_display_results.get('info')
+        print(f"info is None: {info is None}")
+        if info:
+            print(f"info data shape: {info.data.shape}")
+            
+        # Check threshold mode for debugging
+        threshold_mode = self.current_display_results.get('detHResponseThresh', 'unknown')
+        print(f"Current threshold mode: {threshold_mode}")
+        if threshold_mode == -2:
+            print("This is from INTERACTIVE THRESHOLD - should work!")
+            print(f"blob count: {info.data.shape[0]}")
+            
         if info is None or info.data.shape[0] == 0:
+            print("ERROR: No particles - showing warning")
             messagebox.showwarning("No Particles", "No particles detected in current analysis.")
             return
+            
+        print(f"ViewParticles should work - launching...")
+        print(f"==============================")
 
         # Import and launch particle viewer using the working version from particle_measurements.py
         try:
             from particle_measurements import ViewParticles
-            print(f"DEBUG: Launching particle viewer with {info.data.shape[0]} particles")
             ViewParticles(self.current_display_image, info)
         except Exception as e:
             messagebox.showerror("Viewer Error", f"Failed to open particle viewer:\n{str(e)}")

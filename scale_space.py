@@ -120,7 +120,7 @@ def BlobDetectors(L, gammaNorm):
     gammaNorm : float - Gamma normalization factor (should be 1 for blob detection)
 
     Returns:
-    int - 0 for success (matching Igor Pro)
+    tuple - (detH_wave, LapG_wave) or int 0 for success when used in Igor Pro mode
     """
     print(f"Computing blob detectors with gammaNorm = {gammaNorm}")
 
@@ -233,7 +233,8 @@ def BlobDetectors(L, gammaNorm):
     print(f"detH range: [{np.min(detH_data):.6f}, {np.max(detH_data):.6f}]")
     print(f"LapG range: [{np.min(LapG_data):.6f}, {np.max(LapG_data):.6f}]")
 
-    return 0  # Success code like Igor Pro
+    # Return the detector waves directly for Python usage
+    return detH_wave, LapG_wave
 
 
 def FixBoundaries(wave):
