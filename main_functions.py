@@ -1298,7 +1298,7 @@ def BatchHessianBlobs(images_dict, params=None):
 def SaveBatchResults(batch_results, output_path="", save_format="igor"):
     """
     Save batch analysis results in Igor Pro compatible format
-    Matches Igor Pro data export functionality
+    Matches Igor Pro tutorial Series_X folder structure exactly
 
     Parameters:
         batch_results : dict - Results from BatchHessianBlobs
@@ -1307,21 +1307,30 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
     """
     import os
     import datetime
+    import numpy as np
 
     if not output_path:
         output_path = os.getcwd()
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # IGOR PRO STYLE FILE NAMING AND STRUCTURE
-    series_name = batch_results.get('series_folder', 'HessianBlobSeries')
+    # Igor Pro: Create Series_X folder structure
+    series_num = 1
+    series_folder_name = f"Series_{series_num}"
+    while os.path.exists(os.path.join(output_path, series_folder_name)):
+        series_num += 1
+        series_folder_name = f"Series_{series_num}"
+    
+    series_path = os.path.join(output_path, series_folder_name)
+    os.makedirs(series_path, exist_ok=True)
 
+    # Igor Pro: Save Files in Series_X folder structure
     if save_format == "igor" or save_format == "txt":
-        # Save parameters (Igor Pro Parameters wave)
-        params_file = os.path.join(output_path, f"{series_name}_Parameters_{timestamp}.txt")
+        # Igor Pro: Save Parameters wave in Series folder
+        params_file = os.path.join(series_path, "Parameters.txt")
         with open(params_file, 'w') as f:
-            f.write("Hessian Blob Analysis Parameters\n")
-            f.write("=" * 40 + "\n")
+            f.write("Igor Pro Parameters Wave\n")
+            f.write("=" * 30 + "\n")
             params = batch_results['Parameters'].data
             param_names = [
                 "scaleStart", "layers", "scaleFactor", "detHResponseThresh",
@@ -1333,7 +1342,7 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
             f.write(f"\nTotal Images: {batch_results['numImages']}\n")
             f.write(f"Total Particles: {batch_results['numParticles']}\n")
 
-        # Save concatenated measurement waves (Igor Pro AllHeights, AllVolumes, etc.)
+        # Igor Pro: Save concatenated measurement waves in Series folder (AllHeights, AllVolumes, etc.)
         measurements = {
             'AllHeights': batch_results['AllHeights'],
             'AllVolumes': batch_results['AllVolumes'],
@@ -1342,7 +1351,7 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
         }
 
         for wave_name, wave in measurements.items():
-            wave_file = os.path.join(output_path, f"{series_name}_{wave_name}_{timestamp}.txt")
+            wave_file = os.path.join(series_path, f"{wave_name}.txt")
             with open(wave_file, 'w') as f:
                 f.write(f"Igor Pro Wave: {wave_name}\n")
                 f.write(f"Data points: {len(wave.data)}\n")
@@ -1350,21 +1359,11 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
                 for value in wave.data:
                     f.write(f"{value}\n")
 
-        # Save individual image results (Igor Pro image_Particles folders)
+        # Igor Pro: Save individual image results as ImageName_Particles folders INSIDE Series folder
         for image_name, results in batch_results['image_results'].items():
-            image_folder = os.path.join(output_path, f"{image_name}_Particles_{timestamp}")
+            # Create ImageName_Particles folder inside Series_X
+            image_folder = os.path.join(series_path, f"{image_name}_Particles")
             os.makedirs(image_folder, exist_ok=True)
-
-            # Save Info wave (particle information)
-            info_file = os.path.join(image_folder, "Info.txt")
-            with open(info_file, 'w') as f:
-                f.write("Igor Pro Info Wave - Particle Information\n")
-                f.write("Columns: P_Seed, Q_Seed, NumPixels, MaxBlobStrength, pStart, pStop, qStart, qStop, ")
-                f.write("scale, layer, maximal, parentBlob, numBlobs, unused, particleNumber\n")
-
-                info_data = results['info'].data
-                for row in info_data:
-                    f.write("\t".join(map(str, row)) + "\n")
 
             # Save measurement waves for this image
             image_measurements = {
@@ -1387,6 +1386,30 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
                         f.write("Data:\n")
                         for value in wave.data:
                             f.write(f"{value}\n")
+
+            # Igor Pro: Create individual particle folders (Particle_0, Particle_1, etc.)
+            info_data = results['info'].data
+            for i in range(info_data.shape[0]):
+                particle_folder = os.path.join(image_folder, f"Particle_{i}")
+                os.makedirs(particle_folder, exist_ok=True)
+                
+                # Save particle crop and measurements (simplified for now)
+                particle_info_file = os.path.join(particle_folder, "ParticleInfo.txt")
+                with open(particle_info_file, 'w') as f:
+                    f.write(f"Particle {i} Information\n")
+                    f.write(f"Height: {results['Heights'].data[i] if i < len(results['Heights'].data) else 'N/A'}\n")
+                    f.write(f"Area: {results['Areas'].data[i] if i < len(results['Areas'].data) else 'N/A'}\n")
+                    f.write(f"Volume: {results['Volumes'].data[i] if i < len(results['Volumes'].data) else 'N/A'}\n")
+                    f.write(f"Center: ({results['COM'].data[i, 0]:.2f}, {results['COM'].data[i, 1]:.2f})\n")
+
+            # Save Info wave (particle information) in image folder
+            info_file = os.path.join(image_folder, "Info.txt")
+            with open(info_file, 'w') as f:
+                f.write("Igor Pro Info Wave - Particle Information\n")
+                f.write("Columns: P_Seed, Q_Seed, NumPixels, MaxBlobStrength, pStart, pStop, qStart, qStop, ")
+                f.write("scale, layer, maximal, parentBlob, numBlobs, unused, particleNumber\n")
+                for row in info_data:
+                    f.write("\t".join(map(str, row)) + "\n")
 
     elif save_format == "csv":
         # CSV format for Excel compatibility
@@ -1469,10 +1492,10 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
             print("Warning: h5py not available, falling back to text format")
             return SaveBatchResults(batch_results, output_path, "txt")
     
-    print(f"Batch results saved to: {output_path}")
+    print(f"Batch results saved to: {series_path}")
     print(f"Format: {save_format}")
-    print(f"Files created with timestamp: {timestamp}")
-    return output_path
+    print(f"Igor Pro Series folder created: {series_folder_name}")
+    return series_path
 
 
 def SaveSingleImageResults(results, image_name, output_path="", save_format="igor"):
@@ -1494,36 +1517,57 @@ def SaveSingleImageResults(results, image_name, output_path="", save_format="igo
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Create Igor Pro style folder structure
-    folder_name = f"{image_name}_Particles_{timestamp}"
+    # Igor Pro: Create ImageName_Particles folder structure  
+    folder_name = f"{image_name}_Particles"
     full_path = os.path.join(output_path, folder_name)
     os.makedirs(full_path, exist_ok=True)
 
     if save_format == "igor" or save_format == "txt":
-        # Save Info wave (Igor Pro Info wave structure)
+        # Igor Pro: Save measurement waves in main folder
+        measurements = {
+            'Heights': results['Heights'],
+            'Areas': results['Areas'],
+            'Volumes': results['Volumes'],
+            'AvgHeights': results['AvgHeights'],
+            'COM': results['COM']
+        }
+
+        for wave_name, wave in measurements.items():
+            wave_file = os.path.join(full_path, f"{wave_name}.txt")
+            with open(wave_file, 'w') as f:
+                f.write(f"Igor Pro Wave: {wave_name}\n")
+                if wave_name == 'COM':
+                    f.write("Columns: X_Center, Y_Center\n")
+                    for row in wave.data:
+                        f.write(f"{row[0]}\t{row[1]}\n")
+                else:
+                    f.write("Data:\n")
+                    for value in wave.data:
+                        f.write(f"{value}\n")
+
+        # Igor Pro: Create individual particle folders (Particle_0, Particle_1, etc.)
+        info_data = results['info'].data
+        for i in range(info_data.shape[0]):
+            particle_folder = os.path.join(full_path, f"Particle_{i}")
+            os.makedirs(particle_folder, exist_ok=True)
+            
+            # Save particle measurements in each particle folder
+            particle_info_file = os.path.join(particle_folder, "ParticleInfo.txt")
+            with open(particle_info_file, 'w') as f:
+                f.write(f"Particle {i} Information\n")
+                f.write(f"Height: {results['Heights'].data[i] if i < len(results['Heights'].data) else 'N/A'}\n")
+                f.write(f"Area: {results['Areas'].data[i] if i < len(results['Areas'].data) else 'N/A'}\n")
+                f.write(f"Volume: {results['Volumes'].data[i] if i < len(results['Volumes'].data) else 'N/A'}\n")
+                f.write(f"Center: ({results['COM'].data[i, 0]:.2f}, {results['COM'].data[i, 1]:.2f})\n")
+
+        # Igor Pro: Save Info wave in main folder
         info_file = os.path.join(full_path, "Info.txt")
         with open(info_file, 'w') as f:
             f.write("Igor Pro Info Wave - Particle Detection Results\n")
             f.write(f"Image: {image_name}\n")
             f.write(f"Particles Found: {results['numParticles']}\n")
-            f.write("Info Wave Key:\n")
-            f.write("  [0] P Seed - central x-position in pixel units\n")
-            f.write("  [1] Q Seed - central y-position in pixel units\n")
-            f.write("  [2] NumPixels - number of pixels in particle\n")
-            f.write("  [3] Maximum blob strength\n")
-            f.write("  [4] pStart - left x-position of bounding box\n")
-            f.write("  [5] pStop - right x-position of bounding box\n")
-            f.write("  [6] qStart - bottom y-position of bounding box\n")
-            f.write("  [7] qStop - top y-position of bounding box\n")
-            f.write("  [8] scale - scale at which extrema was located\n")
-            f.write("  [9] layer - layer in discrete scale-space\n")
-            f.write("  [10] maximal - 1 for scale-maximal, 0 else\n")
-            f.write("  [11] parent blob number\n")
-            f.write("  [12] number of contained blobs if maximal\n")
-            f.write("  [13] unused\n")
-            f.write("  [14] particle acceptance status\n")
-            f.write("\nData:\n")
-
+            f.write("Columns: P_Seed, Q_Seed, NumPixels, MaxBlobStrength, pStart, pStop, qStart, qStop, ")
+            f.write("scale, layer, maximal, parentBlob, numBlobs, unused, particleNumber\n")
             info_data = results['info'].data
             for row in info_data:
                 f.write("\t".join(map(str, row)) + "\n")

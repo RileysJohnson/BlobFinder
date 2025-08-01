@@ -1139,51 +1139,75 @@ class HessianBlobGUI:
             self.canvas.draw()
     
     def plot_histogram(self):
-        """Igor Pro: Plot histogram of detected blob sizes (NOT image pixels)"""
-        if self.current_display_results is None or 'info' not in self.current_display_results:
+        """Igor Pro: Plot histogram of detected blob measurements"""
+        if self.current_display_results is None:
             messagebox.showwarning("No Analysis", "Please run blob detection first.")
             return
         
         try:
-            # Get blob size data from analysis results
-            info = self.current_display_results['info']
-            if info.data.shape[0] == 0:
+            # Igor Pro: Try to use measurement waves first (Heights, Areas, Volumes)
+            measurement_data = None
+            measurement_name = ""
+            
+            if ('Heights' in self.current_display_results and 
+                self.current_display_results['Heights'] is not None and 
+                len(self.current_display_results['Heights'].data) > 0):
+                measurement_data = self.current_display_results['Heights'].data
+                measurement_name = "Heights"
+            elif ('Areas' in self.current_display_results and 
+                  self.current_display_results['Areas'] is not None and 
+                  len(self.current_display_results['Areas'].data) > 0):
+                measurement_data = self.current_display_results['Areas'].data
+                measurement_name = "Areas"
+            elif ('Volumes' in self.current_display_results and 
+                  self.current_display_results['Volumes'] is not None and 
+                  len(self.current_display_results['Volumes'].data) > 0):
+                measurement_data = self.current_display_results['Volumes'].data
+                measurement_name = "Volumes"
+            elif ('info' in self.current_display_results and 
+                  self.current_display_results['info'] is not None and 
+                  self.current_display_results['info'].data.shape[0] > 0):
+                # Fallback to blob sizes from info wave
+                measurement_data = self.current_display_results['info'].data[:, 2]  # Column 2 = radius
+                measurement_name = "Blob Sizes"
+            else:
+                messagebox.showwarning("No Data", "No measurement data available for histogram.")
+                return
+                
+            if len(measurement_data) == 0:
                 messagebox.showwarning("No Blobs", "No blobs detected to plot.")
                 return
             
             import matplotlib.pyplot as plt
             
-            # Extract blob sizes (radius is in column 2)
-            blob_sizes = info.data[:, 2]  # Column 2 = radius
-            
             # Create new figure for histogram (Igor Pro style)
             fig, ax = plt.subplots(figsize=(8, 6))
             
             # Plot histogram with Igor Pro style (15 bins, gray color)
-            n_bins = min(15, max(5, len(blob_sizes) // 3))  # 5-15 bins based on data
-            ax.hist(blob_sizes, bins=n_bins, color='gray', alpha=0.7, edgecolor='black')
+            n_bins = min(15, max(5, len(measurement_data) // 3))  # 5-15 bins based on data
+            ax.hist(measurement_data, bins=n_bins, color='gray', alpha=0.7, edgecolor='black')
             
             # Igor Pro style formatting
-            ax.set_title("Histogram - Blob Sizes", fontsize=12, fontweight='bold')
-            ax.set_xlabel('Blob Size (pixels)', fontsize=11)
+            ax.set_title(f"Histogram - {measurement_name}", fontsize=12, fontweight='bold')
+            ax.set_xlabel(measurement_name, fontsize=11)
             ax.set_ylabel('Count', fontsize=11)
             ax.grid(True, alpha=0.3)
             
             # Add statistics text (Igor Pro style)
-            mean_size = np.mean(blob_sizes)
-            std_size = np.std(blob_sizes)
-            min_size = np.min(blob_sizes)
-            max_size = np.max(blob_sizes)
-            total_count = len(blob_sizes)
+            mean_val = np.mean(measurement_data)
+            std_val = np.std(measurement_data)
+            min_val = np.min(measurement_data)
+            max_val = np.max(measurement_data)
+            total_count = len(measurement_data)
             
-            stats_text = f'Mean: {mean_size:.2f}\nStd Dev: {std_size:.2f}\nMin: {min_size:.2f}\nMax: {max_size:.2f}\nTotal: {total_count}'
+            stats_text = f'Mean: {mean_val:.2f}\nStd Dev: {std_val:.2f}\nMin: {min_val:.2f}\nMax: {max_val:.2f}\nTotal: {total_count}'
             ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
             
             plt.tight_layout()
             plt.show()
             
-            self.log_message(f"Blob size histogram plotted ({total_count} blobs)")
+            self.log_message(f"{measurement_name} histogram plotted ({total_count} measurements)")
             
         except Exception as e:
             self.log_message(f"Error plotting histogram: {str(e)}")
