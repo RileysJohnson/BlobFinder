@@ -1309,8 +1309,24 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
     import datetime
     import numpy as np
 
+    print(f"=== SAVE BATCH RESULTS DEBUG ===")
+    print(f"Function called with:")
+    print(f"  output_path: {output_path}")
+    print(f"  save_format: {save_format}")
+    print(f"  batch_results type: {type(batch_results)}")
+    print(f"  batch_results keys: {list(batch_results.keys()) if batch_results else 'None'}")
+
+    if not batch_results:
+        print("ERROR: No batch results provided!")
+        raise ValueError("No batch results provided to save")
+
     if not output_path:
         output_path = os.getcwd()
+        print(f"Using current directory: {output_path}")
+
+    if not os.path.exists(output_path):
+        print(f"ERROR: Output path does not exist: {output_path}")
+        raise ValueError(f"Output path does not exist: {output_path}")
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -1322,7 +1338,14 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
         series_folder_name = f"Series_{series_num}"
     
     series_path = os.path.join(output_path, series_folder_name)
-    os.makedirs(series_path, exist_ok=True)
+    print(f"Creating Series folder: {series_path}")
+    
+    try:
+        os.makedirs(series_path, exist_ok=True)
+        print(f"Series folder created successfully: {os.path.exists(series_path)}")
+    except Exception as e:
+        print(f"ERROR: Failed to create Series folder: {e}")
+        raise
 
     # Igor Pro: Save Files in Series_X folder structure
     if save_format == "igor" or save_format == "txt":
@@ -1359,57 +1382,40 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
                 for value in wave.data:
                     f.write(f"{value}\n")
 
-        # Igor Pro: Save individual image results as ImageName_Particles folders INSIDE Series folder
+        # Igor Pro: Create Individual_Results folder inside Series_X
+        individual_results_path = os.path.join(series_path, "Individual_Results")
+        os.makedirs(individual_results_path, exist_ok=True)
+        
+        # Igor Pro: Save individual image results as simple files in Individual_Results folder
         for image_name, results in batch_results['image_results'].items():
-            # Create ImageName_Particles folder inside Series_X
-            image_folder = os.path.join(series_path, f"{image_name}_Particles")
-            os.makedirs(image_folder, exist_ok=True)
-
-            # Save measurement waves for this image
-            image_measurements = {
-                'Heights': results['Heights'],
-                'Areas': results['Areas'],
-                'Volumes': results['Volumes'],
-                'AvgHeights': results['AvgHeights'],
-                'COM': results['COM']
-            }
-
-            for wave_name, wave in image_measurements.items():
-                wave_file = os.path.join(image_folder, f"{wave_name}.txt")
-                with open(wave_file, 'w') as f:
-                    f.write(f"Igor Pro Wave: {wave_name}\n")
-                    if wave_name == 'COM':
-                        f.write("Columns: X_Center, Y_Center\n")
-                        for row in wave.data:
-                            f.write(f"{row[0]}\t{row[1]}\n")
-                    else:
-                        f.write("Data:\n")
-                        for value in wave.data:
-                            f.write(f"{value}\n")
-
-            # Igor Pro: Create individual particle folders (Particle_0, Particle_1, etc.)
-            info_data = results['info'].data
-            for i in range(info_data.shape[0]):
-                particle_folder = os.path.join(image_folder, f"Particle_{i}")
-                os.makedirs(particle_folder, exist_ok=True)
+            # Create single results file for each image (Igor Pro format)
+            results_file = os.path.join(individual_results_path, f"{image_name}_Results.txt")
+            
+            with open(results_file, 'w') as f:
+                f.write(f"Igor Pro Analysis Results - {image_name}\n")
+                f.write("=" * 50 + "\n")
+                f.write(f"Image: {image_name}\n")
+                f.write(f"Particles Found: {results['info'].data.shape[0]}\n\n")
                 
-                # Save particle crop and measurements (simplified for now)
-                particle_info_file = os.path.join(particle_folder, "ParticleInfo.txt")
-                with open(particle_info_file, 'w') as f:
-                    f.write(f"Particle {i} Information\n")
-                    f.write(f"Height: {results['Heights'].data[i] if i < len(results['Heights'].data) else 'N/A'}\n")
-                    f.write(f"Area: {results['Areas'].data[i] if i < len(results['Areas'].data) else 'N/A'}\n")
-                    f.write(f"Volume: {results['Volumes'].data[i] if i < len(results['Volumes'].data) else 'N/A'}\n")
-                    f.write(f"Center: ({results['COM'].data[i, 0]:.2f}, {results['COM'].data[i, 1]:.2f})\n")
-
-            # Save Info wave (particle information) in image folder
-            info_file = os.path.join(image_folder, "Info.txt")
-            with open(info_file, 'w') as f:
-                f.write("Igor Pro Info Wave - Particle Information\n")
-                f.write("Columns: P_Seed, Q_Seed, NumPixels, MaxBlobStrength, pStart, pStop, qStart, qStop, ")
-                f.write("scale, layer, maximal, parentBlob, numBlobs, unused, particleNumber\n")
-                for row in info_data:
-                    f.write("\t".join(map(str, row)) + "\n")
+                # Write measurement data in table format
+                f.write("Particle\tHeight\tArea\tVolume\tAvgHeight\tX_Center\tY_Center\n")
+                
+                # Safe access to measurement waves with bounds checking
+                heights = results['Heights'].data if 'Heights' in results and len(results['Heights'].data) > 0 else []
+                areas = results['Areas'].data if 'Areas' in results and len(results['Areas'].data) > 0 else []
+                volumes = results['Volumes'].data if 'Volumes' in results and len(results['Volumes'].data) > 0 else []
+                avg_heights = results['AvgHeights'].data if 'AvgHeights' in results and len(results['AvgHeights'].data) > 0 else []
+                com = results['COM'].data if 'COM' in results and results['COM'].data.shape[0] > 0 else []
+                
+                num_particles = max(len(heights), len(areas), len(volumes), len(avg_heights), len(com))
+                for i in range(num_particles):
+                    height_val = f"{heights[i]:.3f}" if i < len(heights) else "N/A"
+                    area_val = f"{areas[i]:.3f}" if i < len(areas) else "N/A"
+                    volume_val = f"{volumes[i]:.3f}" if i < len(volumes) else "N/A"
+                    avg_height_val = f"{avg_heights[i]:.3f}" if i < len(avg_heights) else "N/A"
+                    x_center = f"{com[i, 0]:.2f}" if i < len(com) and com.shape[1] >= 2 else "N/A"
+                    y_center = f"{com[i, 1]:.2f}" if i < len(com) and com.shape[1] >= 2 else "N/A"
+                    f.write(f"{i+1}\t{height_val}\t{area_val}\t{volume_val}\t{avg_height_val}\t{x_center}\t{y_center}\n")
 
     elif save_format == "csv":
         # CSV format for Excel compatibility
@@ -1427,18 +1433,26 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
             # Headers
             writer.writerow(['Image', 'Particle_ID', 'Height', 'Area', 'Volume', 'AvgHeight', 'X_Center', 'Y_Center'])
 
-            # Data from each image
+            # Data from each image with safe access
             for image_name, results in batch_results['image_results'].items():
-                heights = results['Heights'].data
-                areas = results['Areas'].data
-                volumes = results['Volumes'].data
-                avg_heights = results['AvgHeights'].data
-                com = results['COM'].data
+                # Safe access to measurement waves with bounds checking
+                heights = results['Heights'].data if 'Heights' in results and len(results['Heights'].data) > 0 else []
+                areas = results['Areas'].data if 'Areas' in results and len(results['Areas'].data) > 0 else []
+                volumes = results['Volumes'].data if 'Volumes' in results and len(results['Volumes'].data) > 0 else []
+                avg_heights = results['AvgHeights'].data if 'AvgHeights' in results and len(results['AvgHeights'].data) > 0 else []
+                com = results['COM'].data if 'COM' in results and results['COM'].data.shape[0] > 0 else []
 
-                for i in range(len(heights)):
+                num_particles = max(len(heights), len(areas), len(volumes), len(avg_heights), len(com))
+                for i in range(num_particles):
+                    height_val = heights[i] if i < len(heights) else 'N/A'
+                    area_val = areas[i] if i < len(areas) else 'N/A'
+                    volume_val = volumes[i] if i < len(volumes) else 'N/A'
+                    avg_height_val = avg_heights[i] if i < len(avg_heights) else 'N/A'
+                    x_center = com[i, 0] if i < len(com) and com.shape[1] >= 2 else 'N/A'
+                    y_center = com[i, 1] if i < len(com) and com.shape[1] >= 2 else 'N/A'
                     writer.writerow([
-                        image_name, i + 1, heights[i], areas[i], volumes[i],
-                        avg_heights[i], com[i, 0], com[i, 1]
+                        image_name, i + 1, height_val, area_val, volume_val,
+                        avg_height_val, x_center, y_center
                     ])
 
     elif save_format == "hdf5":
@@ -1492,9 +1506,13 @@ def SaveBatchResults(batch_results, output_path="", save_format="igor"):
             print("Warning: h5py not available, falling back to text format")
             return SaveBatchResults(batch_results, output_path, "txt")
     
+    print(f"=== SAVE BATCH RESULTS COMPLETE ===")
     print(f"Batch results saved to: {series_path}")
     print(f"Format: {save_format}")
     print(f"Igor Pro Series folder created: {series_folder_name}")
+    print(f"Series folder exists: {os.path.exists(series_path)}")
+    print(f"Files in series folder: {os.listdir(series_path) if os.path.exists(series_path) else 'N/A'}")
+    print(f"=== SAVE BATCH RESULTS END ===")
     return series_path
 
 
@@ -1511,19 +1529,52 @@ def SaveSingleImageResults(results, image_name, output_path="", save_format="igo
     """
     import os
     import datetime
+    import numpy as np
+
+    print(f"=== SAVE SINGLE IMAGE DEBUG ===")
+    print(f"Function called with:")
+    print(f"  image_name: {image_name}")
+    print(f"  output_path: {output_path}")
+    print(f"  save_format: {save_format}")
+    print(f"  results type: {type(results)}")
+    print(f"  results keys: {list(results.keys()) if results else 'None'}")
+
+    if not results:
+        print("ERROR: No results provided!")
+        raise ValueError("No results provided to save")
 
     if not output_path:
         output_path = os.getcwd()
+        print(f"Using current directory: {output_path}")
+
+    if not os.path.exists(output_path):
+        print(f"ERROR: Output path does not exist: {output_path}")
+        raise ValueError(f"Output path does not exist: {output_path}")
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Igor Pro: Create ImageName_Particles folder structure  
     folder_name = f"{image_name}_Particles"
     full_path = os.path.join(output_path, folder_name)
-    os.makedirs(full_path, exist_ok=True)
+    print(f"Creating folder: {full_path}")
+    
+    try:
+        os.makedirs(full_path, exist_ok=True)
+        print(f"Folder created successfully: {os.path.exists(full_path)}")
+    except Exception as e:
+        print(f"ERROR: Failed to create folder: {e}")
+        raise
 
     if save_format == "igor" or save_format == "txt":
+        print("Saving in Igor Pro format...")
+        
         # Igor Pro: Save measurement waves in main folder
+        required_keys = ['Heights', 'Areas', 'Volumes', 'AvgHeights', 'COM']
+        missing_keys = [key for key in required_keys if key not in results]
+        if missing_keys:
+            print(f"ERROR: Missing required keys in results: {missing_keys}")
+            raise ValueError(f"Missing required measurement waves: {missing_keys}")
+            
         measurements = {
             'Heights': results['Heights'],
             'Areas': results['Areas'],
@@ -1531,34 +1582,66 @@ def SaveSingleImageResults(results, image_name, output_path="", save_format="igo
             'AvgHeights': results['AvgHeights'],
             'COM': results['COM']
         }
+        
+        print(f"Saving {len(measurements)} measurement waves...")
 
         for wave_name, wave in measurements.items():
             wave_file = os.path.join(full_path, f"{wave_name}.txt")
-            with open(wave_file, 'w') as f:
-                f.write(f"Igor Pro Wave: {wave_name}\n")
-                if wave_name == 'COM':
-                    f.write("Columns: X_Center, Y_Center\n")
-                    for row in wave.data:
-                        f.write(f"{row[0]}\t{row[1]}\n")
-                else:
-                    f.write("Data:\n")
-                    for value in wave.data:
-                        f.write(f"{value}\n")
+            print(f"Saving {wave_name} to {wave_file}")
+            
+            if wave is None:
+                print(f"ERROR: Wave {wave_name} is None!")
+                continue
+                
+            if not hasattr(wave, 'data'):
+                print(f"ERROR: Wave {wave_name} has no data attribute!")
+                continue
+                
+            try:
+                with open(wave_file, 'w') as f:
+                    f.write(f"Igor Pro Wave: {wave_name}\n")
+                    if wave_name == 'COM':
+                        f.write("Columns: X_Center, Y_Center\n")
+                        for row in wave.data:
+                            f.write(f"{row[0]}\t{row[1]}\n")
+                    else:
+                        f.write("Data:\n")
+                        for value in wave.data:
+                            f.write(f"{value}\n")
+                print(f"Successfully wrote {wave_name} ({os.path.getsize(wave_file)} bytes)")
+            except Exception as e:
+                print(f"ERROR: Failed to write {wave_name}: {e}")
+                raise
 
         # Igor Pro: Create individual particle folders (Particle_0, Particle_1, etc.)
         info_data = results['info'].data
+        print(f"Creating particle folders for {info_data.shape[0]} particles")
+        
+        # Check if measurement waves have data
+        heights_data = results['Heights'].data if 'Heights' in results and len(results['Heights'].data) > 0 else []
+        areas_data = results['Areas'].data if 'Areas' in results and len(results['Areas'].data) > 0 else []
+        volumes_data = results['Volumes'].data if 'Volumes' in results and len(results['Volumes'].data) > 0 else []
+        com_data = results['COM'].data if 'COM' in results and results['COM'].data.shape[0] > 0 else []
+        
+        print(f"Measurement wave sizes: Heights={len(heights_data)}, Areas={len(areas_data)}, Volumes={len(volumes_data)}, COM={len(com_data)}")
+        
         for i in range(info_data.shape[0]):
             particle_folder = os.path.join(full_path, f"Particle_{i}")
             os.makedirs(particle_folder, exist_ok=True)
             
-            # Save particle measurements in each particle folder
+            # Save particle measurements in each particle folder with bounds checking
             particle_info_file = os.path.join(particle_folder, "ParticleInfo.txt")
             with open(particle_info_file, 'w') as f:
                 f.write(f"Particle {i} Information\n")
-                f.write(f"Height: {results['Heights'].data[i] if i < len(results['Heights'].data) else 'N/A'}\n")
-                f.write(f"Area: {results['Areas'].data[i] if i < len(results['Areas'].data) else 'N/A'}\n")
-                f.write(f"Volume: {results['Volumes'].data[i] if i < len(results['Volumes'].data) else 'N/A'}\n")
-                f.write(f"Center: ({results['COM'].data[i, 0]:.2f}, {results['COM'].data[i, 1]:.2f})\n")
+                f.write(f"Height: {heights_data[i] if i < len(heights_data) else 'N/A'}\n")
+                f.write(f"Area: {areas_data[i] if i < len(areas_data) else 'N/A'}\n")
+                f.write(f"Volume: {volumes_data[i] if i < len(volumes_data) else 'N/A'}\n")
+                
+                # Safe COM access with bounds checking
+                if i < len(com_data) and len(com_data[i]) >= 2:
+                    f.write(f"Center: ({com_data[i][0]:.2f}, {com_data[i][1]:.2f})\n")
+                else:
+                    f.write("Center: N/A\n")
 
         # Igor Pro: Save Info wave in main folder
         info_file = os.path.join(full_path, "Info.txt")
@@ -1595,6 +1678,29 @@ def SaveSingleImageResults(results, image_name, output_path="", save_format="igo
                     for value in wave.data:
                         f.write(f"{value}\n")
 
+        # Igor Pro: Save analysis summary
+        summary_file = os.path.join(full_path, "analysis_summary.txt")
+        with open(summary_file, 'w') as f:
+            f.write("Hessian Blob Analysis Summary\n")
+            f.write("=" * 40 + "\n")
+            f.write(f"Image: {image_name}\n")
+            f.write(f"Analysis Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total Particles: {results['numParticles']}\n\n")
+            
+            # Statistics if available
+            if 'Heights' in results and len(results['Heights'].data) > 0:
+                heights = results['Heights'].data
+                areas = results['Areas'].data
+                volumes = results['Volumes'].data
+                
+                f.write("Particle Statistics:\n")
+                f.write(f"Mean Height: {np.mean(heights):.3f}\n")
+                f.write(f"Mean Area: {np.mean(areas):.3f}\n") 
+                f.write(f"Mean Volume: {np.mean(volumes):.3f}\n")
+                f.write(f"Height Range: {np.min(heights):.3f} - {np.max(heights):.3f}\n")
+                f.write(f"Area Range: {np.min(areas):.3f} - {np.max(areas):.3f}\n")
+                f.write(f"Volume Range: {np.min(volumes):.3f} - {np.max(volumes):.3f}\n")
+
         # Save analysis parameters
         params_file = os.path.join(full_path, "Parameters.txt")
         with open(params_file, 'w') as f:
@@ -1624,16 +1730,28 @@ def SaveSingleImageResults(results, image_name, output_path="", save_format="igo
             writer.writerow([])
             writer.writerow(['Particle_ID', 'Height', 'Area', 'Volume', 'AvgHeight', 'X_Center', 'Y_Center'])
 
-            heights = results['Heights'].data
-            areas = results['Areas'].data
-            volumes = results['Volumes'].data
-            avg_heights = results['AvgHeights'].data
-            com = results['COM'].data
+            # Safe access to measurement waves with bounds checking
+            heights = results['Heights'].data if 'Heights' in results and len(results['Heights'].data) > 0 else []
+            areas = results['Areas'].data if 'Areas' in results and len(results['Areas'].data) > 0 else []
+            volumes = results['Volumes'].data if 'Volumes' in results and len(results['Volumes'].data) > 0 else []
+            avg_heights = results['AvgHeights'].data if 'AvgHeights' in results and len(results['AvgHeights'].data) > 0 else []
+            com = results['COM'].data if 'COM' in results and results['COM'].data.shape[0] > 0 else []
 
-            for i in range(len(heights)):
-                writer.writerow([i + 1, heights[i], areas[i], volumes[i], avg_heights[i], com[i, 0], com[i, 1]])
+            num_particles = max(len(heights), len(areas), len(volumes), len(avg_heights), len(com))
+            for i in range(num_particles):
+                height_val = heights[i] if i < len(heights) else 'N/A'
+                area_val = areas[i] if i < len(areas) else 'N/A'
+                volume_val = volumes[i] if i < len(volumes) else 'N/A'
+                avg_height_val = avg_heights[i] if i < len(avg_heights) else 'N/A'
+                x_center = com[i, 0] if i < len(com) and com.shape[1] >= 2 else 'N/A'
+                y_center = com[i, 1] if i < len(com) and com.shape[1] >= 2 else 'N/A'
+                writer.writerow([i + 1, height_val, area_val, volume_val, avg_height_val, x_center, y_center])
 
+    print(f"=== SAVE SINGLE IMAGE COMPLETE ===")
     print(f"Single image results saved to: {full_path}")
+    print(f"Folder exists: {os.path.exists(full_path)}")
+    print(f"Files in folder: {os.listdir(full_path) if os.path.exists(full_path) else 'N/A'}")
+    print(f"=== SAVE SINGLE IMAGE END ===")
     return full_path
 
 

@@ -26,17 +26,86 @@ if not hasattr(np, 'complex'):
 # ViewParticleData function moved to main_functions.py to avoid conflicts
 # The better implementation with particle viewer is in main_functions.py
 
+def load_saved_particle_data(data_path):
+    """
+    Load particle data from saved Igor Pro format files
+    
+    Parameters:
+    data_path : str - Path to Igor Pro format data folder
+    
+    Returns:
+    im : Wave - Original image (reconstructed from particle data)
+    info : Wave - Particle information array
+    """
+    import os
+    from utilities import Wave
+    
+    # Check if data path exists
+    if not os.path.exists(data_path):
+        raise ValueError(f"Data path does not exist: {data_path}")
+    
+    # Try to load Info.txt (particle information)
+    info_file = os.path.join(data_path, "Info.txt")
+    if not os.path.exists(info_file):
+        raise ValueError("No Info.txt file found in data folder")
+    
+    # Load particle information
+    info_data = []
+    with open(info_file, 'r') as f:
+        lines = f.readlines()
+        reading_data = False
+        for line in lines:
+            line = line.strip()
+            if "P_Seed" in line and "Q_Seed" in line:  # Header line
+                reading_data = True
+                continue
+            if reading_data and line:
+                try:
+                    parts = line.split('\t')
+                    if len(parts) >= 4:  # At least X, Y, scale, response
+                        info_data.append([float(p) for p in parts])
+                except ValueError:
+                    continue
+    
+    if not info_data:
+        raise ValueError("No particle data found in Info.txt")
+    
+    info = Wave(np.array(info_data), "info")
+    
+    # Create a dummy image based on particle locations (if no original image available)
+    # Use particle coordinates to estimate image size
+    if info_data:
+        max_x = max(row[0] for row in info_data)
+        max_y = max(row[1] for row in info_data)
+        image_size = (int(max_y + 50), int(max_x + 50))  # Add some padding
+        im_data = np.zeros(image_size)
+        im = Wave(im_data, "ReconstructedImage")
+    else:
+        im = Wave(np.zeros((100, 100)), "EmptyImage")
+    
+    return im, info
 
-def ViewParticles(im, info, mapNum=None):
+
+def ViewParticles(im, info, mapNum=None, saved_data_path=None):
     """
     Interactive particle viewer
     Direct port from Igor Pro ViewParticles function
+    Enhanced to work with both live analysis data and saved Igor Pro format files
 
     Parameters:
-    im : Wave - Original image
-    info : Wave - Particle information array
+    im : Wave - Original image (or None if loading from saved data)
+    info : Wave - Particle information array (or None if loading from saved data)
     mapNum : Wave - Particle number map (optional)
+    saved_data_path : str - Path to saved Igor Pro format data folder (optional)
     """
+    # Load from saved data if path provided
+    if saved_data_path is not None:
+        try:
+            im, info = load_saved_particle_data(saved_data_path)
+        except Exception as e:
+            messagebox.showerror("Load Error", f"Failed to load saved particle data:\n{str(e)}")
+            return
+    
     # Validation
     if im is None:
         messagebox.showerror("Error", "No image provided.")
