@@ -1,17 +1,6 @@
 """
 Preprocessing Module
 Contains image preprocessing functions for blob detection
-Direct port from Igor Pro code maintaining same variable names and structure
-
-// Copyright 2019 by The Curators of the University of Missouri, a public corporation //
-//																					   //
-// Hessian Blob Particle Detection Suite - Python Port  //
-//                                                       //
-// G.M. King Laboratory                                  //
-// University of Missouri-Columbia	                     //
-// Original Igor Pro coded by: Brendan Marsh             //
-// Email: marshbp@stanford.edu		                     //
-// Python port maintains 1-1 functionality              //
 """
 
 import numpy as np

@@ -253,10 +253,13 @@ class HessianBlobGUI:
                     # Load the image
                     wave = LoadWave(file_path)
                     if wave is not None:
-                        # Store in current images
+                        # Store in current images - prevent duplicates
                         filename = os.path.basename(file_path)
-                        self.current_images[filename] = wave
-                        self.log_message(f"Loaded: {filename}")
+                        if filename in self.current_images:
+                            self.log_message(f"Already loaded: {filename} (skipping)")
+                        else:
+                            self.current_images[filename] = wave
+                            self.log_message(f"Loaded: {filename}")
 
                 except Exception as e:
                     self.log_message(f"Error loading {file_path}: {str(e)}")
@@ -284,8 +287,11 @@ class HessianBlobGUI:
                             wave = LoadWave(str(file_path))
                             if wave is not None:
                                 filename = file_path.name
-                                self.current_images[filename] = wave
-                                loaded_count += 1
+                                if filename in self.current_images:
+                                    self.log_message(f"Already loaded: {filename} (skipping)")
+                                else:
+                                    self.current_images[filename] = wave
+                                    loaded_count += 1
                         except Exception as e:
                             self.log_message(f"Error loading {file_path}: {str(e)}")
 
@@ -1067,63 +1073,103 @@ class HessianBlobGUI:
             self.log_message(f"Error in batch analysis: {str(e)}")
             messagebox.showerror("Batch Analysis Error", f"Batch analysis failed:\n{str(e)}")
 
+    def show_data_source_dialog(self, title="Select Data Source"):
+        """Show data source selection dialog"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("400x200")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        dialog.transient(self.root)
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+        dialog.geometry(f"400x200+{x}+{y}")
+        
+        result = {"choice": None}
+        
+        # Main frame
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Title
+        ttk.Label(main_frame, text="Choose data source:", 
+                  font=('TkDefaultFont', 11, 'bold')).pack(pady=(0, 15))
+        
+        # Radio button variable
+        choice_var = tk.StringVar(value="current")
+        
+        # Radio buttons
+        ttk.Radiobutton(main_frame, text="Use current image analysis results", 
+                        variable=choice_var, value="current").pack(anchor=tk.W, pady=5)
+        ttk.Radiobutton(main_frame, text="Load saved results from file", 
+                        variable=choice_var, value="load").pack(anchor=tk.W, pady=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=(20, 0))
+        
+        def ok_clicked():
+            result["choice"] = choice_var.get()
+            dialog.destroy()
+            
+        def cancel_clicked():
+            result["choice"] = None
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="OK", command=ok_clicked).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT)
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        return result["choice"]
+
     def view_particles(self):
-        """FIXED: Launch particle viewer for current results - works for ALL threshold modes"""
-        print(f"=== VIEW PARTICLES DEBUG ===")
-        print(f"view_particles called")
-        print(f"current_display_results is None: {self.current_display_results is None}")
-
-        # Igor Pro: Check if we have valid analysis results or offer to load saved data
-        if (self.current_display_results is None or
-                'info' not in self.current_display_results or
-                self.current_display_results['info'] is None):
-            print("No current analysis results - offering to load saved data")
-            
-            # Igor Pro workflow: Offer to load saved results if no current analysis
-            response = messagebox.askyesnocancel(
-                "No Analysis Results", 
-                "No analysis results available for this image.\n\n" +
-                "Would you like to:\n" +
-                "• Yes: Load saved analysis results from file\n" + 
-                "• No: Run new analysis on current image\n" +
-                "• Cancel: Return to main window"
-            )
-            
-            if response is True:  # Yes - Load saved data
-                self.load_saved_results_for_viewing()
-                return
-            elif response is False:  # No - Run analysis
-                self.run_single_analysis()
-                return
-            else:  # Cancel
-                return
-
-        info = self.current_display_results['info']
-        blob_count = info.data.shape[0]
-        print(f"info data shape: {info.data.shape}")
-        print(f"blob count: {blob_count}")
-
-        # Check threshold mode for debugging
-        threshold_mode = self.current_display_results.get('detHResponseThresh', 'unknown')
-        print(f"Current threshold mode: {threshold_mode}")
-
-        if blob_count == 0:
-            print("INFO: No particles found - showing empty viewer")
-            messagebox.showinfo("No Particles",
-                                f"No particles were detected in this analysis.\n\n" +
-                                f"Threshold mode: {threshold_mode}\n" +
-                                f"Try adjusting the analysis parameters or threshold value.")
+        """Launch particle viewer with data source selection"""
+        # Show data source dialog
+        choice = self.show_data_source_dialog("View Particles - Select Data Source")
+        
+        if choice is None:  # User cancelled
             return
-
-        print(f"ViewParticles should work - launching...")
-        print(f"==============================")
-
-        # Import and launch particle viewer using the working version from particle_measurements.py
-        try:
-            from particle_measurements import ViewParticles
-            ViewParticles(self.current_display_image, info)
-        except Exception as e:
-            messagebox.showerror("Viewer Error", f"Failed to open particle viewer:\n{str(e)}")
+        elif choice == "current":
+            # Use current analysis results
+            if (self.current_display_results is None or 
+                'info' not in self.current_display_results or 
+                self.current_display_results['info'] is None):
+                messagebox.showwarning("No Results", "No analysis results available for current image.")
+                return
+                
+            info = self.current_display_results['info']
+            if info.data.shape[0] == 0:
+                messagebox.showinfo("No Particles", "No particles found in current analysis.")
+                return
+                
+            # Launch viewer with current results
+            try:
+                from particle_measurements import ViewParticles
+                ViewParticles(self.current_display_image, info)
+            except Exception as e:
+                messagebox.showerror("Viewer Error", f"Failed to open particle viewer:\n{str(e)}")
+                
+        elif choice == "load":
+            # Load saved results
+            try:
+                results_folder = filedialog.askdirectory(
+                    title="Select Saved Analysis Results Folder",
+                    initialdir=os.getcwd()
+                )
+                
+                if not results_folder:
+                    return
+                
+                # Load and launch viewer with saved data
+                from particle_measurements import ViewParticles
+                ViewParticles(None, None, saved_data_path=results_folder)
+                
+            except Exception as e:
+                messagebox.showerror("Load Error", f"Failed to load saved results:\n{str(e)}")
 
     def export_results(self):
         """Export analysis results to file"""
@@ -1154,36 +1200,67 @@ class HessianBlobGUI:
             self.canvas.draw()
     
     def plot_histogram(self):
-        """Igor Pro: Plot histogram of detected blob measurements"""
-        if self.current_display_results is None:
-            messagebox.showwarning("No Analysis", "Please run blob detection first.")
-            return
+        """Plot histogram with data source selection"""
+        # Show data source dialog
+        choice = self.show_data_source_dialog("Plot Histogram - Select Data Source")
         
+        if choice is None:  # User cancelled
+            return
+        elif choice == "current":
+            # Use current analysis results
+            if self.current_display_results is None:
+                messagebox.showwarning("No Analysis", "No analysis results available for current image.")
+                return
+            self.plot_histogram_from_results(self.current_display_results)
+            
+        elif choice == "load":
+            # Load saved results
+            try:
+                results_folder = filedialog.askdirectory(
+                    title="Select Saved Analysis Results Folder",
+                    initialdir=os.getcwd()
+                )
+                
+                if not results_folder:
+                    return
+                
+                # Load results and plot histogram
+                loaded_results = self.load_saved_results_for_histogram(results_folder)
+                if loaded_results:
+                    self.plot_histogram_from_results(loaded_results)
+                else:
+                    messagebox.showerror("Load Error", "Could not load histogram data from selected folder.")
+                    
+            except Exception as e:
+                messagebox.showerror("Load Error", f"Failed to load saved results:\n{str(e)}")
+
+    def plot_histogram_from_results(self, results):
+        """Plot histogram from analysis results"""
         try:
             # Igor Pro: Try to use measurement waves first (Heights, Areas, Volumes)
             measurement_data = None
             measurement_name = ""
             
-            if ('Heights' in self.current_display_results and 
-                self.current_display_results['Heights'] is not None and 
-                len(self.current_display_results['Heights'].data) > 0):
-                measurement_data = self.current_display_results['Heights'].data
+            if ('Heights' in results and 
+                results['Heights'] is not None and 
+                len(results['Heights'].data) > 0):
+                measurement_data = results['Heights'].data
                 measurement_name = "Heights"
-            elif ('Areas' in self.current_display_results and 
-                  self.current_display_results['Areas'] is not None and 
-                  len(self.current_display_results['Areas'].data) > 0):
-                measurement_data = self.current_display_results['Areas'].data
+            elif ('Areas' in results and 
+                  results['Areas'] is not None and 
+                  len(results['Areas'].data) > 0):
+                measurement_data = results['Areas'].data
                 measurement_name = "Areas"
-            elif ('Volumes' in self.current_display_results and 
-                  self.current_display_results['Volumes'] is not None and 
-                  len(self.current_display_results['Volumes'].data) > 0):
-                measurement_data = self.current_display_results['Volumes'].data
+            elif ('Volumes' in results and 
+                  results['Volumes'] is not None and 
+                  len(results['Volumes'].data) > 0):
+                measurement_data = results['Volumes'].data
                 measurement_name = "Volumes"
-            elif ('info' in self.current_display_results and 
-                  self.current_display_results['info'] is not None and 
-                  self.current_display_results['info'].data.shape[0] > 0):
+            elif ('info' in results and 
+                  results['info'] is not None and 
+                  results['info'].data.shape[0] > 0):
                 # Fallback to blob sizes from info wave
-                measurement_data = self.current_display_results['info'].data[:, 2]  # Column 2 = radius
+                measurement_data = results['info'].data[:, 2]  # Column 2 = radius
                 measurement_name = "Blob Sizes"
             else:
                 messagebox.showwarning("No Data", "No measurement data available for histogram.")
@@ -1240,8 +1317,64 @@ class HessianBlobGUI:
             self.log_message(f"Error plotting histogram: {str(e)}")
             messagebox.showerror("Histogram Error", f"Failed to plot histogram:\n{str(e)}")
 
+    def load_saved_results_for_histogram(self, results_folder):
+        """Load saved analysis results for histogram plotting"""
+        try:
+            from utilities import Wave
+            import numpy as np
+            
+            # Try to load Igor Pro format measurement data directly
+            measurement_files = {
+                'Heights': os.path.join(results_folder, 'Heights.txt'),
+                'Areas': os.path.join(results_folder, 'Areas.txt'), 
+                'Volumes': os.path.join(results_folder, 'Volumes.txt'),
+                'Info': os.path.join(results_folder, 'Info.txt')
+            }
+            
+            # Check if required files exist
+            if not os.path.exists(measurement_files['Info']):
+                return None
+                
+            # Load the measurement data for histogram
+            results = {}
+            
+            # Load Heights, Areas, Volumes
+            for wave_name in ['Heights', 'Areas', 'Volumes']:
+                file_path = measurement_files[wave_name]
+                if os.path.exists(file_path):
+                    data = self.load_wave_data(file_path)
+                    if data is not None:
+                        results[wave_name] = Wave(data, wave_name)
+            
+            # Load info data for fallback
+            info_data = []
+            with open(measurement_files['Info'], 'r') as f:
+                lines = f.readlines()
+                reading_data = False
+                for line in lines:
+                    line = line.strip()
+                    if "P_Seed" in line and "Q_Seed" in line:  # Header line
+                        reading_data = True
+                        continue
+                    if reading_data and line:
+                        try:
+                            parts = line.split('\t')
+                            if len(parts) >= 4:  # At least X, Y, scale, response
+                                info_data.append([float(p) for p in parts])
+                        except ValueError:
+                            continue
+            
+            if info_data:
+                results['info'] = Wave(np.array(info_data), "info")
+            
+            return results if results else None
+            
+        except Exception as e:
+            print(f"Error loading saved results for histogram: {e}")
+            return None
+
     def prompt_save_batch_results(self):
-        """Igor Pro-style save dialog for batch analysis results"""
+        """Automatically save all batch analysis results"""
         if not self.current_results:
             return
 
@@ -1252,114 +1385,38 @@ class HessianBlobGUI:
             for results in self.current_results.values()
         )
 
-        # Create unified save dialog (matching single dialog layout)
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Save Analysis Results")
-        dialog.geometry("500x900")
-        dialog.resizable(True, True)
-        dialog.grab_set()
-
-        # Center the dialog
-        dialog.transient(self.root)
-        dialog.focus_set()
-
-        # Main frame
-        main_frame = ttk.Frame(dialog, padding="15")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Header info
-        header_frame = ttk.Frame(main_frame)
-        header_frame.pack(fill=tk.X, pady=(0, 15))
-
-        ttk.Label(header_frame, text="Hessian Blob Analysis Results",
-                  font=('TkDefaultFont', 12, 'bold')).pack(anchor=tk.W)
-        ttk.Label(header_frame, text=f"Processed {total_images} images, found {total_blobs} total blobs").pack(
-            anchor=tk.W)
-
-        # Save options (Igor Pro style)
-        options_frame = ttk.LabelFrame(main_frame, text="Save Options", padding="10")
-        options_frame.pack(fill=tk.X, pady=(0, 15))
-
-        # Variables for save options
-        save_vars = {
-            'particle_info': tk.BooleanVar(value=True),
-            'scale_space': tk.BooleanVar(value=False),
-            'blob_maps': tk.BooleanVar(value=False),
-            'summary_report': tk.BooleanVar(value=True),
-            'individual_files': tk.BooleanVar(value=False)
-        }
-
-        # Checkboxes for save options
-        ttk.Checkbutton(options_frame, text="Particle Information (coordinates, sizes, measurements)",
-                        variable=save_vars['particle_info']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Scale-space representations (detH, LapG)",
-                        variable=save_vars['scale_space']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Blob detection maps (maxima locations)",
-                        variable=save_vars['blob_maps']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Analysis summary report",
-                        variable=save_vars['summary_report']).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(options_frame, text="Save individual files for each image",
-                        variable=save_vars['individual_files']).pack(anchor=tk.W, pady=2)
-
-        # File format selection
-        format_frame = ttk.LabelFrame(main_frame, text="Output Format", padding="10")
-        format_frame.pack(fill=tk.X, pady=(0, 15))
-
-        format_var = tk.StringVar(value="igor")
-        ttk.Radiobutton(format_frame, text="Igor Pro format (.txt files)",
-                        variable=format_var, value="igor").pack(anchor=tk.W, pady=2)
-        ttk.Radiobutton(format_frame, text="CSV files (Excel compatible)",
-                        variable=format_var, value="csv").pack(anchor=tk.W, pady=2)
-
-        # Output directory selection
-        dir_frame = ttk.LabelFrame(main_frame, text="Output Location", padding="10")
-        dir_frame.pack(fill=tk.X, pady=(0, 15))
-
-        output_dir = tk.StringVar(value=os.getcwd())
-        dir_entry_frame = ttk.Frame(dir_frame)
-        dir_entry_frame.pack(fill=tk.X)
-
-        ttk.Entry(dir_entry_frame, textvariable=output_dir, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(dir_entry_frame, text="Browse...",
-                   command=lambda: self.browse_output_directory(output_dir)).pack(side=tk.RIGHT, padx=(5, 0))
-
-        # Buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(15, 0))
-
-        def accept_settings():
-            """Igor Pro: Accept the settings and save batch results"""
-            if not any(save_vars[key].get() for key in save_vars):
-                messagebox.showwarning("No Options Selected", "Please select at least one save option.")
+        # Get output directory from user
+        output_dir = filedialog.askdirectory(
+            title="Select Output Directory for Batch Results",
+            initialdir=os.getcwd()
+        )
+        
+        if not output_dir:
+            return
+        
+        try:
+            # Auto-save all results without dialog
+            batch_results = self.prepare_batch_results_for_save()
+            
+            if batch_results is not None:
+                from main_functions import SaveBatchResults
+                SaveBatchResults(batch_results, output_dir, "igor")  # Default to Igor format
+                particles_msg = f"with {batch_results['numParticles']} particles" if batch_results['numParticles'] > 0 else "with no particles detected"
+                self.log_message(f"All batch results automatically saved to {output_dir} {particles_msg}!")
+                messagebox.showinfo("Save Complete", 
+                                  f"All batch analysis results saved successfully!\n\n"
+                                  f"Location: {output_dir}\n"
+                                  f"Images processed: {total_images}\n"
+                                  f"Total blobs detected: {total_blobs}")
+            else:
+                messagebox.showwarning("No Data", "No analysis results to save - no images have been analyzed.")
                 return
                 
-            if not output_dir.get():
-                messagebox.showwarning("No Directory", "Please select an output directory first.")
-                return
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
+            import traceback
+            print(f"Save error details: {traceback.format_exc()}")
 
-            try:
-                # Igor Pro workflow: Accept settings, then save
-                batch_results = self.prepare_batch_results_for_save()
-                
-                if batch_results and batch_results['numParticles'] > 0:
-                    from main_functions import SaveBatchResults
-                    SaveBatchResults(batch_results, output_dir.get(), format_var.get())
-                    self.log_message(f"Batch results saved successfully to {output_dir.get()}!")
-                else:
-                    messagebox.showwarning("No Data", "No analysis results to save.")
-                    return
-                    
-                dialog.destroy()
-            except Exception as e:
-                messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
-                import traceback
-                print(f"Save error details: {traceback.format_exc()}")
-
-        ttk.Button(button_frame, text="Accept", command=accept_settings).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
-
-        # Wait for dialog to close
-        dialog.wait_window()
 
     def browse_output_directory(self, dir_var):
         """Browse for output directory"""
@@ -1473,18 +1530,60 @@ class HessianBlobGUI:
             with open(file_path, 'r') as f:
                 lines = f.readlines()
                 reading_data = False
+                
                 for line in lines:
                     line = line.strip()
-                    if line == "Data:":
+                    
+                    # Skip empty lines and comments
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # Look for data section markers
+                    if line in ["Data:", "BEGIN", "DATA"] or "Data:" in line:
                         reading_data = True
                         continue
-                    if reading_data and line:
+                    
+                    # Stop reading if we hit end markers
+                    if line in ["END", "end"] or line.startswith("END"):
+                        break
+                    
+                    # Try to parse numerical data
+                    if reading_data:
                         try:
-                            data.append(float(line))
+                            # Handle tab-separated or space-separated values
+                            if '\t' in line:
+                                values = line.split('\t')
+                            else:
+                                values = line.split()
+                            
+                            # Take the first numerical value
+                            for val in values:
+                                try:
+                                    data.append(float(val))
+                                    break  # Only take first value per line for 1D data
+                                except ValueError:
+                                    continue
                         except ValueError:
                             continue
+                    else:
+                        # If no data marker found, try to parse all numerical lines
+                        try:
+                            if '\t' in line:
+                                values = line.split('\t')
+                            else:
+                                values = line.split()
+                            
+                            for val in values:
+                                try:
+                                    data.append(float(val))
+                                    break  # Only take first value per line
+                                except ValueError:
+                                    continue
+                        except ValueError:
+                            continue
+                            
             return np.array(data) if data else None
-        except Exception:
+        except Exception as e:
             return None
             
     def load_com_data(self, file_path):
@@ -1515,36 +1614,82 @@ class HessianBlobGUI:
     def prepare_batch_results_for_save(self):
         """FIXED: Prepare current analysis results in Igor Pro BatchHessianBlobs format"""
         if not self.current_results:
+            print("DEBUG: No current_results to save")
             return None
             
         from utilities import Wave
         import numpy as np
         
-        # Collect all measurement waves (Igor Pro style concatenation)
+        print(f"DEBUG: Preparing batch results from {len(self.current_results)} images")
+        
+        # Collect all measurement data from info waves
+        all_info_data = []
+        valid_results = {}
+        total_particles = 0
+        
+        for image_name, results in self.current_results.items():
+            print(f"DEBUG: Processing {image_name}")
+            if results and 'info' in results and results['info'] is not None:
+                info = results['info']
+                if info.data.shape[0] > 0:
+                    print(f"  Found {info.data.shape[0]} particles")
+                    all_info_data.extend(info.data)
+                    valid_results[image_name] = results
+                    total_particles += info.data.shape[0]
+                else:
+                    print("  No particles in this image")
+            else:
+                print("  No info data found")
+        
+        print(f"DEBUG: Total particles across all images: {total_particles}")
+        
+        if total_particles == 0:
+            print("DEBUG: No particles found in any image")
+            # Still create a batch results structure even with 0 particles (Igor Pro compatibility)
+            batch_results = {
+                'series_folder': f'BatchAnalysis_{len(self.current_results)}Images',
+                'numParticles': 0,
+                'numImages': len(self.current_results),
+                'image_results': self.current_results,
+                'AllHeights': Wave(np.array([]), "AllHeights"),
+                'AllVolumes': Wave(np.array([]), "AllVolumes"),
+                'AllAreas': Wave(np.array([]), "AllAreas"),
+                'AllAvgHeights': Wave(np.array([]), "AllAvgHeights")
+            }
+            return batch_results
+        
+        # Extract measurement data from info waves
+        all_info_array = np.array(all_info_data)
+        
+        # Create measurement waves from info data
         all_heights_data = []
         all_volumes_data = []
         all_areas_data = []
         all_avg_heights_data = []
         
-        valid_results = {}
+        for image_name, results in valid_results.items():
+            if 'Heights' in results and results['Heights'] is not None:
+                # Use existing measurement waves if available
+                all_heights_data.extend(results['Heights'].data)
+                all_volumes_data.extend(results['Volumes'].data)
+                all_areas_data.extend(results['Areas'].data)
+                all_avg_heights_data.extend(results['AvgHeights'].data)
+            else:
+                # Extract from info wave if measurement waves not available
+                info = results['info']
+                if info.data.shape[1] > 10:  # Has measurement columns
+                    all_heights_data.extend(info.data[:, 10])  # Height column
+                    all_areas_data.extend(info.data[:, 8])     # Area column
+                    all_volumes_data.extend(info.data[:, 9])   # Volume column
+                    all_avg_heights_data.extend(info.data[:, 10])  # Use height as avg height
+                else:
+                    # Default values if no measurements available
+                    n_particles = info.data.shape[0]
+                    all_heights_data.extend([0.0] * n_particles)
+                    all_areas_data.extend([0.0] * n_particles)
+                    all_volumes_data.extend([0.0] * n_particles)
+                    all_avg_heights_data.extend([0.0] * n_particles)
         
-        for image_name, results in self.current_results.items():
-            if results and 'Heights' in results and results['Heights'] is not None:
-                heights = results['Heights'].data
-                volumes = results['Volumes'].data
-                areas = results['Areas'].data
-                avg_heights = results['AvgHeights'].data
-                
-                if len(heights) > 0:
-                    all_heights_data.extend(heights)
-                    all_volumes_data.extend(volumes)
-                    all_areas_data.extend(areas)
-                    all_avg_heights_data.extend(avg_heights)
-                    valid_results[image_name] = results
-        
-        if not all_heights_data:
-            return None
-            
         # Create Igor Pro style batch results structure
         batch_results = {
             'series_folder': f'BatchAnalysis_{len(valid_results)}Images',
@@ -1553,11 +1698,12 @@ class HessianBlobGUI:
             'AllVolumes': Wave(np.array(all_volumes_data), "AllVolumes"),
             'AllAreas': Wave(np.array(all_areas_data), "AllAreas"),
             'AllAvgHeights': Wave(np.array(all_avg_heights_data), "AllAvgHeights"),
-            'numParticles': len(all_heights_data),
+            'numParticles': total_particles,
             'numImages': len(valid_results),
             'image_results': valid_results
         }
         
+        print(f"DEBUG: Created batch results with {batch_results['numParticles']} particles from {batch_results['numImages']} images")
         return batch_results
 
     def save_batch_results_to_files(self, output_dir, save_vars, file_format):
@@ -1770,116 +1916,35 @@ class HessianBlobGUI:
             f.write(f'Average Blobs per Image: {total_blobs / len(self.current_results):.2f}\n')
 
     def prompt_single_image_save(self, results, image_name):
-        """Igor Pro: Unified save dialog for single image analysis results"""
+        """Automatically save single image analysis results"""
         try:
             # Count particles for display
             particle_count = results['info'].data.shape[0] if results and 'info' in results else 0
             
-            # Create unified save dialog (matching batch dialog layout)
-            dialog = tk.Toplevel(self.root)
-            dialog.title("Save Analysis Results")
-            dialog.geometry("500x900")
-            dialog.resizable(True, True)
-            dialog.grab_set()
-
-            # Center the dialog
-            dialog.transient(self.root)
-            dialog.focus_set()
-
-            # Main frame
-            main_frame = ttk.Frame(dialog, padding="15")
-            main_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Header info (unified style)
-            header_frame = ttk.Frame(main_frame)
-            header_frame.pack(fill=tk.X, pady=(0, 15))
-
-            ttk.Label(header_frame, text="Hessian Blob Analysis Results",
-                      font=('TkDefaultFont', 12, 'bold')).pack(anchor=tk.W)
-            ttk.Label(header_frame, text=f"Single image: {image_name}, found {particle_count} particles").pack(
-                anchor=tk.W)
-
-            # Save options (Igor Pro style - unified with batch)
-            options_frame = ttk.LabelFrame(main_frame, text="Save Options", padding="10")
-            options_frame.pack(fill=tk.X, pady=(0, 15))
-
-            # Variables for save options (unified)
-            save_vars = {
-                'particle_info': tk.BooleanVar(value=True),
-                'scale_space': tk.BooleanVar(value=False),
-                'blob_maps': tk.BooleanVar(value=False),
-                'summary_report': tk.BooleanVar(value=True),
-                'individual_files': tk.BooleanVar(value=True)  # Default True for single image
-            }
-
-            # Checkboxes for save options (unified)
-            ttk.Checkbutton(options_frame, text="Particle Information (coordinates, sizes, measurements)",
-                            variable=save_vars['particle_info']).pack(anchor=tk.W, pady=2)
-            ttk.Checkbutton(options_frame, text="Scale-space representations (detH, LapG)",
-                            variable=save_vars['scale_space']).pack(anchor=tk.W, pady=2)
-            ttk.Checkbutton(options_frame, text="Blob detection maps (maxima locations)",
-                            variable=save_vars['blob_maps']).pack(anchor=tk.W, pady=2)
-            ttk.Checkbutton(options_frame, text="Analysis summary report",
-                            variable=save_vars['summary_report']).pack(anchor=tk.W, pady=2)
-            ttk.Checkbutton(options_frame, text="Individual particle folders",
-                            variable=save_vars['individual_files']).pack(anchor=tk.W, pady=2)
-
-            # File format selection (unified)
-            format_frame = ttk.LabelFrame(main_frame, text="Output Format", padding="10")
-            format_frame.pack(fill=tk.X, pady=(0, 15))
-
-            format_var = tk.StringVar(value="igor")
-            ttk.Radiobutton(format_frame, text="Igor Pro format (.txt files)",
-                            variable=format_var, value="igor").pack(anchor=tk.W, pady=2)
-            ttk.Radiobutton(format_frame, text="CSV files (Excel compatible)",
-                            variable=format_var, value="csv").pack(anchor=tk.W, pady=2)
-
-            # Output directory selection (unified)
-            dir_frame = ttk.LabelFrame(main_frame, text="Output Location", padding="10")
-            dir_frame.pack(fill=tk.X, pady=(0, 15))
-
-            output_dir = tk.StringVar(value=os.getcwd())
-            dir_entry_frame = ttk.Frame(dir_frame)
-            dir_entry_frame.pack(fill=tk.X)
-
-            ttk.Entry(dir_entry_frame, textvariable=output_dir, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            ttk.Button(dir_entry_frame, text="Browse...",
-                       command=lambda: self.browse_output_directory(output_dir)).pack(side=tk.RIGHT, padx=(5, 0))
-
-            # Buttons (unified)
-            button_frame = ttk.Frame(main_frame)
-            button_frame.pack(fill=tk.X, pady=(15, 0))
-
-            def accept_settings():
-                """Igor Pro: Accept the settings and save results"""
-                if not any(save_vars[key].get() for key in save_vars):
-                    messagebox.showwarning("No Options Selected", "Please select at least one save option.")
-                    return
-                    
-                if not output_dir.get():
-                    messagebox.showwarning("No Directory", "Please select an output directory first.")
-                    return
-
-                try:
-                    # Igor Pro workflow: Accept settings, then save
-                    from main_functions import SaveSingleImageResults
-                    SaveSingleImageResults(results, image_name, output_dir.get(), format_var.get())
-                    self.log_message(f"Single image results saved to {output_dir.get()}!")
-                    dialog.destroy()
-                except Exception as e:
-                    messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
-                    import traceback
-                    print(f"Save error details: {traceback.format_exc()}")
-
-            ttk.Button(button_frame, text="Accept", command=accept_settings).pack(side=tk.RIGHT, padx=(5, 0))
-            ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
+            # Get output directory from user
+            output_dir = filedialog.askdirectory(
+                title="Select Output Directory for Single Image Results",
+                initialdir=os.getcwd()
+            )
             
-            # Wait for dialog to close
-            dialog.wait_window()
+            if not output_dir:
+                return
             
+            # Auto-save all results without dialog
+            from main_functions import SaveSingleImageResults
+            SaveSingleImageResults(results, image_name, output_dir, "igor")  # Default to Igor format
+            self.log_message(f"Single image results automatically saved to {output_dir}!")
+            messagebox.showinfo("Save Complete", 
+                              f"Single image analysis results saved successfully!\n\n"
+                              f"Location: {output_dir}\n"
+                              f"Image: {image_name}\n"
+                              f"Particles detected: {particle_count}")
+                              
         except Exception as e:
-            self.log_message(f"Error in save dialog: {str(e)}")
-            messagebox.showerror("Dialog Error", f"Failed to show save dialog:\n{str(e)}")
+            messagebox.showerror("Save Error", f"Failed to save results:\n{str(e)}")
+            import traceback
+            print(f"Save error details: {traceback.format_exc()}")
+
 
     def show_about(self):
         """Show about dialog"""

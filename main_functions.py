@@ -1,17 +1,6 @@
 """
 Main Functions Module
 Contains the primary analysis functions for the blob detection algorithm
-Direct port from Igor Pro code maintaining same variable names and structure
-
-// Copyright 2019 by The Curators of the University of Missouri, a public corporation //
-//																					   //
-// Hessian Blob Particle Detection Suite - Python Port  //
-//                                                       //
-// G.M. King Laboratory                                  //
-// University of Missouri-Columbia	                     //
-// Coded by: Brendan Marsh                               //
-// Email: marshbp@stanford.edu		                     //
-// Python port maintains 1-1 functionality              //
 """
 
 import numpy as np
@@ -61,7 +50,6 @@ def Duplicate(source_wave, new_name):
 def ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, min_response, subPixelMult=1, allowOverlap=0):
     """
     Extract blob information from maxima maps
-    Based on Igor Pro FindHessianBlobs function lines 1260-1290
     """
     print("Extracting blob information...")
 
@@ -85,10 +73,8 @@ def ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, min_response, subPixelMult=1, all
         response = SS_MAXMAP.data[i, j]
         scale = SS_MAXSCALEMAP.data[i, j] if SS_MAXSCALEMAP is not None else 1.0
 
-        # Igor Pro line 1274: rad = sqrt(2*ScaleMap[i][j])
         radius = np.sqrt(2 * scale)
 
-        # Igor Pro: Store blob information (matching Igor Pro format)
         blob_info[idx, 0] = x_coord  # X position
         blob_info[idx, 1] = y_coord  # Y position
         blob_info[idx, 2] = radius  # Radius
@@ -141,12 +127,11 @@ def filter_overlapping_blobs(blob_info):
 
 def igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio):
     """
-    Igor Pro Otsu threshold implementation - exact match
-    Based on Igor Pro OtsuThreshold function lines 631-665
+    Otsu thresholding
     """
     print("Running Igor Pro Otsu threshold...")
 
-    # First identify the maxes (Igor Pro line 636)
+    # First identify the maxes
     maxes_wave = Maxes(detH, LG, particleType, maxCurvatureRatio)
 
     if maxes_wave is None or maxes_wave.data.size == 0:
@@ -160,17 +145,16 @@ def igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio):
         print("No valid maxes for Otsu threshold")
         return 0.0
 
-    # Create a histogram using bin=5 (Igor Pro line 641)
+    # Create a histogram using bin=5 
     hist, bin_edges = np.histogram(maxes_data, bins=5)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     bin_width = bin_edges[1] - bin_edges[0]
 
-    # Search for the best threshold (Igor Pro lines 644-661)
+    # Search for the best threshold
     min_icv = np.inf
     best_thresh = -np.inf
 
     for i, x_thresh in enumerate(bin_centers):
-        # Calculate intra-class variance (ICV)
 
         # Lower class (values < threshold)
         lower_mask = maxes_data < x_thresh
@@ -190,14 +174,12 @@ def igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio):
             upper_weight = 0
             upper_variance = 0
 
-        # Calculate weighted intra-class variance
         icv = lower_weight * lower_variance + upper_weight * upper_variance
 
         if icv < min_icv:
             best_thresh = x_thresh
             min_icv = icv
 
-    # Igor Pro takes square root of the result (line 251)
     final_threshold = np.sqrt(best_thresh) if best_thresh > 0 else 0.0
 
     print(f"Igor Pro Otsu: best_thresh={best_thresh:.6f}, final_threshold={final_threshold:.6f}")
@@ -215,7 +197,7 @@ def GetBlobDetectionParams():
 
     dialog = tk.Toplevel()
     dialog.title("Hessian Blob Parameters")
-    dialog.geometry("700x750")
+    dialog.geometry("700x400")
     dialog.transient()
     dialog.grab_set()
     dialog.focus_set()
@@ -233,7 +215,7 @@ def GetBlobDetectionParams():
     ttk.Label(main_frame, text="Hessian Blob Parameters",
               font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
 
-    # Igor Pro: Scale parameters - Exact Igor Pro defaults
+    # Scale parameters
     scale_frame = ttk.LabelFrame(main_frame, text="Scale-Space Parameters", padding="10")
     scale_frame.pack(fill=tk.X, pady=5)
 
@@ -242,7 +224,6 @@ def GetBlobDetectionParams():
     ttk.Entry(scale_frame, textvariable=scale_start_var, width=15).grid(row=0, column=1, padx=5)
 
     ttk.Label(scale_frame, text="Maximum Size in Pixels").grid(row=1, column=0, sticky=tk.W)
-    # Igor Pro default: Max(DimSize(im,0), DimSize(im,1))/4 - dynamic based on image size
     scale_max_var = tk.DoubleVar(value=64)  # Default fallback, will be updated based on actual image
     ttk.Entry(scale_frame, textvariable=scale_max_var, width=15).grid(row=1, column=1, padx=5)
 
@@ -302,71 +283,69 @@ def GetBlobDetectionParams():
     ttk.Button(button_frame, text="Cancel", command=cancel_clicked).pack(side=tk.LEFT, padx=5)
 
     dialog.wait_window()
-    
+
     # Check if main dialog was cancelled
     if result[0] is None:
         return None
-    
-    # IGOR PRO: Add constraint dialog (exact Igor Pro implementation)
-    # Igor Pro: DoAlert 2, "Would you like to limit the analysis to particles of certain height, volume, or area?"
+
     try:
         constraint_response = messagebox.askyesnocancel(
             "Particle Constraints",
             "Would you like to limit the analysis to particles of certain height, volume, or area?",
             icon='question'
         )
-        
+
         # Igor Pro: If(V_flag==1) - Yes was clicked
         if constraint_response is True:
-            # Create constraints dialog (Igor Pro Figure 16 layout)
+            # Create constraints dialog
             constraint_dialog = tk.Toplevel()
             constraint_dialog.title("Constraints")
             constraint_dialog.geometry("400x300")
             constraint_dialog.transient()
             constraint_dialog.grab_set()
             constraint_dialog.focus_set()
-            
+
             constraint_result = [None]
-            
+
             constraint_frame = ttk.Frame(constraint_dialog, padding="20")
             constraint_frame.pack(fill=tk.BOTH, expand=True)
-            
+
             ttk.Label(constraint_frame, text="Particle Constraints",
                       font=('TkDefaultFont', 12, 'bold')).pack(pady=(0, 15))
-            
-            # Igor Pro: 2-column layout for min/max pairs
+
+            # 2-column layout for min/max pairs
             params_frame = ttk.Frame(constraint_frame)
             params_frame.pack(fill=tk.X, pady=10)
-            
+
             # Height constraints (Igor Pro: minH, maxH)
             ttk.Label(params_frame, text="Minimum height").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-            minH_var = tk.StringVar(value="-inf")  # Igor Pro default
+            minH_var = tk.StringVar(value="-inf")
             ttk.Entry(params_frame, textvariable=minH_var, width=15).grid(row=0, column=1, padx=5, pady=5)
-            
+
             ttk.Label(params_frame, text="Maximum height").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
-            maxH_var = tk.StringVar(value="inf")  # Igor Pro default
+            maxH_var = tk.StringVar(value="inf")
             ttk.Entry(params_frame, textvariable=maxH_var, width=15).grid(row=0, column=3, padx=5, pady=5)
-            
+
             # Area constraints (Igor Pro: minA, maxA)
             ttk.Label(params_frame, text="Minimum area").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-            minA_var = tk.StringVar(value="-inf")  # Igor Pro default
+            minA_var = tk.StringVar(value="-inf")
             ttk.Entry(params_frame, textvariable=minA_var, width=15).grid(row=1, column=1, padx=5, pady=5)
-            
+
             ttk.Label(params_frame, text="Maximum area").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
-            maxA_var = tk.StringVar(value="inf")  # Igor Pro default
+            maxA_var = tk.StringVar(value="inf")
             ttk.Entry(params_frame, textvariable=maxA_var, width=15).grid(row=1, column=3, padx=5, pady=5)
-            
+
             # Volume constraints (Igor Pro: minV, maxV)
             ttk.Label(params_frame, text="Minimum volume").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
-            minV_var = tk.StringVar(value="-inf")  # Igor Pro default
+            minV_var = tk.StringVar(value="-inf")
             ttk.Entry(params_frame, textvariable=minV_var, width=15).grid(row=2, column=1, padx=5, pady=5)
-            
+
             ttk.Label(params_frame, text="Maximum volume").grid(row=2, column=2, sticky=tk.W, padx=5, pady=5)
-            maxV_var = tk.StringVar(value="inf")  # Igor Pro default
+            maxV_var = tk.StringVar(value="inf")
             ttk.Entry(params_frame, textvariable=maxV_var, width=15).grid(row=2, column=3, padx=5, pady=5)
-            
+
             def parse_constraint_value(value_str):
-                """Parse constraint value, handling 'inf' and '-inf'"""
+                """Parse constraint value, handling inf and -inf"""
                 value_str = value_str.strip().lower()
                 if value_str == 'inf' or value_str == '+inf':
                     return float('inf')
@@ -374,68 +353,66 @@ def GetBlobDetectionParams():
                     return float('-inf')
                 else:
                     return float(value_str)
-            
+
             def constraint_ok_clicked():
                 try:
-                    # Parse all constraint values (Igor Pro variable names)
+                    # Parse all constraint values
                     minH = parse_constraint_value(minH_var.get())
                     maxH = parse_constraint_value(maxH_var.get())
                     minA = parse_constraint_value(minA_var.get())
                     maxA = parse_constraint_value(maxA_var.get())
                     minV = parse_constraint_value(minV_var.get())
                     maxV = parse_constraint_value(maxV_var.get())
-                    
-                    # Add constraints to the original result (Igor Pro: 13 parameters)
+
+                    # Add constraints to the original result
                     result[0].update({
                         'minH': minH, 'maxH': maxH,
                         'minA': minA, 'maxA': maxA,
                         'minV': minV, 'maxV': maxV
                     })
-                    
+
                     constraint_result[0] = True
                     constraint_dialog.destroy()
-                    
+
                 except ValueError as e:
                     messagebox.showerror("Invalid Input", f"Please enter valid numeric values or 'inf'/'-inf':\n{str(e)}")
-            
+
             def constraint_cancel_clicked():
-                # Igor Pro: If( V_flag == 1) Return ""
                 constraint_result[0] = None
                 constraint_dialog.destroy()
-            
-            # Igor Pro: Continue/Cancel buttons
+
+            # Continue/Cancel buttons
             constraint_button_frame = ttk.Frame(constraint_frame)
             constraint_button_frame.pack(side=tk.BOTTOM, pady=15)
-            
+
             ttk.Button(constraint_button_frame, text="Continue", command=constraint_ok_clicked).pack(side=tk.LEFT, padx=5)
             ttk.Button(constraint_button_frame, text="Cancel", command=constraint_cancel_clicked).pack(side=tk.LEFT, padx=5)
-            
+
             constraint_dialog.wait_window()
-            
+
             # Check if constraints dialog was cancelled
             if constraint_result[0] is None:
-                return None  # Igor Pro: Return ""
-                
+                return None
+
         elif constraint_response is None:  # Cancel was clicked on constraint prompt
             return None
-        else:  # No was clicked - add default constraint values (Igor Pro defaults)
+        else:  # No was clicked - add default constraint values
             result[0].update({
                 'minH': float('-inf'), 'maxH': float('inf'),
                 'minA': float('-inf'), 'maxA': float('inf'),
                 'minV': float('-inf'), 'maxV': float('inf')
             })
-    
+
     except Exception as e:
         print(f"Error in constraint dialog: {e}")
         return None
-    
+
     return result[0]
 
 
 def InteractiveThreshold(im, detH, LG, particleType, maxCurvatureRatio):
     """
-    Interactive threshold selection matching Igor Pro behavior
-    FIXED: Returns both threshold and blob info for main GUI
+    Interactive threshold selection
     """
     print("Opening interactive threshold window...")
 
@@ -484,10 +461,10 @@ class ThresholdSelectionWindow:
         self.result = None
         self.current_blob_info = None
 
-        # FIXED: Find range where particles actually exist
+        # Find range where particles actually exist
         self.particle_min, self.particle_max = self.find_particle_range()
 
-        # FIXED: Center the default threshold like Igor Pro (WaveMax(Maxes)/2)
+        # Center the default threshold
         self.current_thresh = (self.particle_min + self.particle_max) / 2.0
 
         # Create GUI
@@ -498,8 +475,8 @@ class ThresholdSelectionWindow:
         self.setup_gui()
 
     def find_particle_range(self):
-        """Find the actual range where particles are detected - FIXED to match Igor Pro exactly"""
-        # FIXED: First identify the maxes exactly like Igor Pro does
+        """Find the range where particles are detected """
+        # First identify the maxes
         SS_MAXMAP_temp = Duplicate(self.im, "SS_MAXMAP_temp")
         SS_MAXMAP_temp.data = np.full(self.im.data.shape, -1.0)
         SS_MAXSCALEMAP_temp = Duplicate(SS_MAXMAP_temp, "SS_MAXSCALEMAP_temp")
@@ -509,17 +486,17 @@ class ThresholdSelectionWindow:
                            map_wave=SS_MAXMAP_temp, scaleMap=SS_MAXSCALEMAP_temp)
 
         if maxes_wave is not None and maxes_wave.data.size > 0:
-            # FIXED: Take sqrt like Igor Pro does: Maxes = Sqrt(Maxes)
+            # Take sqrt like Igor Pro does: Maxes = Sqrt(Maxes)
             maxes_sqrt = np.sqrt(maxes_wave.data)
-            min_val = 0.0  # Igor Pro starts from 0
+            min_val = 0.0
             max_val = np.max(maxes_sqrt)
-            return min_val, max_val * 1.1  # Igor Pro uses WaveMax(Maxes)*1.1 as upper limit
+            return min_val, max_val * 1.1
         else:
             # Fallback if no maxes found
             return 0.0, 1.0
 
     def format_scientific(self, value):
-        """Format number using scientific notation for small values like Igor Pro"""
+        """Format number using scientific notation for small values"""
         if abs(value) < 1e-3 or abs(value) > 1e6:
             return f"{value:.3e}"
         else:
@@ -527,7 +504,7 @@ class ThresholdSelectionWindow:
 
     def setup_gui(self):
         """Setup the GUI components"""
-        # Main layout: Image on left, controls on right (like Igor Pro)
+        # Main layout: Image on left, controls on right
         main_container = ttk.Frame(self.root)
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -540,19 +517,19 @@ class ThresholdSelectionWindow:
         self.canvas = FigureCanvasTkAgg(self.fig, image_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Right: Controls panel (Igor Pro style) - Fixed width 200px like Igor
+        # Right: Controls panel
         controls_container = ttk.Frame(main_container, width=200)
         controls_container.pack(side=tk.RIGHT, fill=tk.Y)
         controls_container.pack_propagate(False)  # Maintain fixed width
 
-        # FIXED: Igor Pro threshold setup - WaveMax(Maxes)/2 starting value
+        # Threshold setup
         maxes_wave = self.get_initial_maxes()
         if maxes_wave is not None and maxes_wave.data.size > 0:
-            maxes_sqrt = np.sqrt(maxes_wave.data)  # Igor Pro: Maxes = Sqrt(Maxes)
+            maxes_sqrt = np.sqrt(maxes_wave.data)
             wave_max = np.max(maxes_sqrt)
             self.particle_min = 0.0
-            self.particle_max = wave_max * 1.1  # Igor Pro upper limit
-            self.current_thresh = wave_max / 2.0  # Igor Pro default: WaveMax(Maxes)/2
+            self.particle_max = wave_max * 1.1
+            self.current_thresh = wave_max / 2.0
         else:
             self.particle_min = 0.0
             self.particle_max = 1.0
@@ -561,8 +538,7 @@ class ThresholdSelectionWindow:
         # Update the threshold variable
         self.thresh_var = tk.DoubleVar(value=self.current_thresh)
 
-        # IGOR PRO LAYOUT: Compact controls panel (200px wide)
-        # Top: Accept/Quit buttons (Igor Pro: pos={0,0}, size={100,50})
+        # Top: Accept/Quit buttons
         button_frame = ttk.Frame(controls_container)
         button_frame.pack(fill=tk.X, pady=(0, 5))
 
@@ -576,7 +552,7 @@ class ThresholdSelectionWindow:
                               width=12)
         quit_btn.pack(side=tk.LEFT)
 
-        # SetVariable control (Igor Pro: pos={10,50}, size={170,100})
+        # SetVariable control
         setvar_frame = ttk.Frame(controls_container)
         setvar_frame.pack(fill=tk.X, pady=5)
 
@@ -590,16 +566,15 @@ class ThresholdSelectionWindow:
                                       font=('TkDefaultFont', 9), foreground='blue')
         self.thresh_label.pack(anchor=tk.W, pady=2)
 
-        # HORIZONTAL Slider (Igor Pro: pos={0,80}, size={100,470}, but horizontal layout)
+        # Horizontal slider
         slider_frame = ttk.Frame(controls_container)
         slider_frame.pack(fill=tk.X, pady=10)
 
         ttk.Label(slider_frame, text="Slider:", font=('TkDefaultFont', 9)).pack(anchor=tk.W)
 
-        # FIXED: Igor Pro slider bounds and increment
+        # Slider bounds and increment
         increment = (self.particle_max - self.particle_min) / 200.0
 
-        # Igor Pro style HORIZONTAL slider
         self.thresh_scale = tk.Scale(slider_frame,
                                      from_=self.particle_min,  # Igor Pro: left = min
                                      to=self.particle_max,  # Igor Pro: right = max
@@ -611,7 +586,7 @@ class ThresholdSelectionWindow:
                                      showvalue=0)  # Don't show value (we have label)
         self.thresh_scale.pack(fill=tk.X, pady=2)
 
-        # FIXED: Set slider to starting position after creation
+        # Set slider to starting position after creation
         self.thresh_scale.set(self.current_thresh)
 
         # Range info (compact)
@@ -673,12 +648,10 @@ class ThresholdSelectionWindow:
         maxes_wave = Maxes(self.detH, self.LG, self.particleType, self.maxCurvatureRatio,
                            map_wave=SS_MAXMAP, scaleMap=SS_MAXSCALEMAP)
 
-        # FIXED: Extract blobs above threshold - Igor Pro compares with squared threshold
-        # Igor Pro line 1270: If(Map[i][j]>S_STruct.curval^2)
         thresh_squared = self.current_thresh * self.current_thresh
         info = ExtractBlobInfo(SS_MAXMAP, SS_MAXSCALEMAP, thresh_squared)
 
-        # CRITICAL FIX: Calculate particle measurements for interactive threshold
+        # Calculate particle measurements for interactive threshold
         if info.data.shape[0] > 0:
             try:
                 from particle_measurements import MeasureParticles
@@ -689,20 +662,20 @@ class ThresholdSelectionWindow:
                 import traceback
                 traceback.print_exc()
 
-        # Show blob circles (like Igor Pro preview)
+        # Show blob circles
         if info.data.shape[0] > 0:
             for i in range(info.data.shape[0]):
                 x_coord = info.data[i, 0]
                 y_coord = info.data[i, 1]
                 radius = info.data[i, 2]
 
-                # Draw perimeter circle (green like Igor Pro)
+                # Draw perimeter circle
                 circle = Circle((x_coord, y_coord), radius,
-                                fill=False, edgecolor='lime', linewidth=2, alpha=0.8)
+                                fill=False, edgecolor='red', linewidth=2, alpha=0.8)
                 self.ax.add_patch(circle)
 
         self.ax.set_xlim(0, self.im.data.shape[1])
-        self.ax.set_ylim(self.im.data.shape[0], 0)  # Flip y axis for image coordinates
+        self.ax.set_ylim(self.im.data.shape[0], 0)
 
         blob_count = info.data.shape[0] if info.data.shape[0] > 0 else 0
         self.blob_count_label.config(text=f"Blobs: {blob_count}")
@@ -715,7 +688,7 @@ class ThresholdSelectionWindow:
         self.canvas.draw()
 
     def draw_blob_regions(self, info):
-        """FIXED: Draw blob regions with red tinting like Igor Pro"""
+        """Draw blob regions with red tintingo"""
         # Create mask for all blob regions
         blob_mask = np.zeros(self.im.data.shape, dtype=bool)
 
@@ -729,11 +702,11 @@ class ThresholdSelectionWindow:
 
             blob_mask |= blob_region
 
-            # Draw perimeter circle (green like Igor Pro)
+            # Draw perimeter circle
             circle = Circle((x, y), radius, fill=False, edgecolor='lime', linewidth=2, alpha=0.8)
             self.ax.add_patch(circle)
 
-        # Create red tinted overlay for blob regions like Igor Pro
+        # Create red tinted overlay for blob regions
         red_overlay = np.zeros((*self.im.data.shape, 4))
         red_overlay[blob_mask] = [1, 0, 0, 0.3]  # Red with transparency
 
@@ -749,7 +722,7 @@ class ThresholdSelectionWindow:
                 print("DEBUG: Forcing update_display to get blob info")
                 self.update_display()  # Force update to get blob info
 
-            # Store maps for later retrieval (simple approach since RegisterWave doesn't exist)
+            # Store maps for later retrieval
             if hasattr(self, 'current_SS_MAXMAP') and self.current_SS_MAXMAP is not None:
                 print("DEBUG: SS_MAXMAP available from interactive threshold")
 
@@ -816,7 +789,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     """
     print("Starting Hessian Blob Detection...")
 
-    # Handle parameter wave if provided (Igor Pro line 184-203)
+    # Handle parameter wave if provided
     if params is not None:
         if len(params.data) < 13:
             raise ValueError("Error: Provided parameter wave must contain the 13 parameters.")
@@ -836,8 +809,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         maxV = params.data[12]
         print("Using parameters from parameter wave")
 
-    # FIXED: Calculate default layers exactly like Igor Pro if not provided
-    # Igor Pro line 143: layers = Max( DimSize(im,0) , DimSize(im,1) ) /4
+    # Calculate default layers if not provided
     if layers is None:
         layers = max(im.data.shape[0], im.data.shape[1]) // 4
         print(f"Using Igor Pro default layers: {layers} (Max(DimSize)/4)")
@@ -845,11 +817,9 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     print(f"Parameters: scaleStart={scaleStart}, layers={layers}, scaleFactor={scaleFactor}")
     print(f"Threshold mode: {detHResponseThresh} (-2=interactive, -1=auto)")
 
-    # STEP 1: Create scale-space representation (matches Igor Pro exactly)
+    # STEP 1: Create scale-space representation
     print("Creating scale-space representation...")
 
-    # FIXED: The key fix - ensure layers is always an integer
-    # Igor Pro: layers = ceil( log( (layers*DimDelta(im,0))^2/(2*scaleStart))/log(scaleFactor) )
     scaleStart_converted = (scaleStart * DimDelta(im, 0)) ** 2 / 2
     layers_calculated = np.log((layers * DimDelta(im, 0)) ** 2 / (2 * scaleStart_converted)) / np.log(scaleFactor)
     layers = int(np.ceil(layers_calculated))  # FIXED: Convert to int
@@ -859,9 +829,8 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     # Ensure minimum values
     layers = max(1, layers)  # At least 1 layer
     scaleFactor = max(1.1, scaleFactor)  # Minimum scale factor
-    subPixelMult = max(1, int(np.round(subPixelMult)))  # FIXED: Ensure integer
+    subPixelMult = max(1, int(np.round(subPixelMult)))
 
-    # FIXED: Igor Pro scale conversion - Sqrt(scaleStart)/DimDelta(im,0)
     igor_scale_start = np.sqrt(scaleStart) / DimDelta(im, 0)
     L = ScaleSpaceRepresentation(im, layers, igor_scale_start, scaleFactor)
 
@@ -869,7 +838,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         print("Failed to create scale-space representation")
         return None
 
-    # STEP 2: Compute blob detectors (like Igor Pro)
+    # STEP 2: Compute blob detectors
     print("Computing blob detectors...")
     detH, LG = BlobDetectors(L, 1)  # gammaNorm = 1 as per Igor Pro default
 
@@ -877,7 +846,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         print("Failed to compute blob detectors")
         return None
 
-    # STEP 3: Handle threshold selection (matching Igor Pro behavior)
+    # STEP 3: Handle threshold selection
     minResponse = detHResponseThresh
 
     interactive_blob_info = None
@@ -900,7 +869,6 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
 
         if threshold_result[0] is None:
             print("WARNING: Interactive threshold cancelled - using automatic fallback")
-            # CRITICAL FIX: Use Otsu threshold as fallback instead of failing
             print("Falling back to Otsu threshold...")
             threshold = igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio)
             minResponse = threshold
@@ -924,20 +892,19 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
                 print(f"ERROR unpacking threshold_result: {e}")
                 print(f"threshold_result contents: {threshold_result}")
                 return None
-    elif detHResponseThresh == -1:  # Otsu's method - FIXED to match Igor Pro exactly
+    elif detHResponseThresh == -1:  # Otsu's method
         print("Calculating Otsu's Threshold (Igor Pro method)...")
         threshold = igor_otsu_threshold(detH, LG, particleType, maxCurvatureRatio)
         print(f"Igor Pro Otsu threshold: {threshold}")
         minResponse = threshold
-    else:  # Fixed threshold
+    else:
         minResponse = detHResponseThresh
         print(f"Using fixed threshold: {minResponse}")
 
-    # Square the minResponse like Igor Pro does
     minResponse_squared = minResponse * minResponse
     print(f"Squared minimum response: {minResponse_squared}")
 
-    # STEP 4: Create output waves (matching Igor Pro)
+    # STEP 4: Create output waves
     mapNum = Duplicate(im, "mapNum")
     mapNum.data = np.zeros(im.data.shape)
 
@@ -948,7 +915,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
     mapMax.data = np.zeros(im.data.shape)
 
     # Initialize info wave for particle information
-    info = Wave(np.zeros((1000, 13)), "info")  # Pre-allocate like Igor Pro
+    info = Wave(np.zeros((1000, 13)), "info")
 
     # STEP 5: Find blobs
     print("Finding blobs with computed detectors...")
@@ -958,7 +925,7 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         print(f"Using interactive blob info with {interactive_blob_info.data.shape[0]} blobs")
         info = interactive_blob_info
 
-        # CRITICAL FIX: Use the maps from the interactive threshold window
+        # Use the maps from the interactive threshold window
         if interactive_SS_MAXMAP is not None and interactive_SS_MAXSCALEMAP is not None:
             SS_MAXMAP = interactive_SS_MAXMAP
             SS_MAXSCALEMAP = interactive_SS_MAXSCALEMAP
@@ -984,56 +951,50 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
 
     print(f"Hessian blob detection complete. Found {info.data.shape[0]} blobs.")
 
-    # IGOR PRO DATA FOLDER STRUCTURE (Lines 216-223)
     # Make a data folder for the particles.
     current_df = "root:"  # Simulate Igor Pro current data folder
     new_df = im.name + "_Particles"
-    # In Python, we'll simulate this with a results dictionary structure
 
-    # Store a copy of the original image (Igor Pro lines 225-231)
+    # Store a copy of the original image
     original = Wave(im.data.copy(), "Original")
     original.note = getattr(im, 'note', '')
     # Set scaling to match original
-    # Note: In Igor Pro this would be SetScale/P x,DimOffset(im,0),DimDelta(im,0), Original
 
     numPotentialParticles = info.data.shape[0]
     print(f"Number of potential particles: {numPotentialParticles}")
 
-    # IGOR PRO MEASUREMENT WAVES (Lines 296-300)
-    # Make waves for the particle measurements.
+    # Make waves for the particle measurements
     volumes = Wave(np.zeros(numPotentialParticles), "Volumes")
     heights = Wave(np.zeros(numPotentialParticles), "Heights")
     com = Wave(np.zeros((numPotentialParticles, 2)), "COM")  # Center of mass
     areas = Wave(np.zeros(numPotentialParticles), "Areas")
     avg_heights = Wave(np.zeros(numPotentialParticles), "AvgHeights")
 
-    # IGOR PRO PARTICLE MEASUREMENT AND CONSTRAINT APPLICATION
     print("Cropping and measuring particles..")
 
-    # Variables for particle measurement calculations (Igor Pro line 308-309)
+    # Variables for particle measurement calculations
     accepted_particles = 0
 
-    # Process each potential particle (Igor Pro lines 313-399+)
-    for i in range(numPotentialParticles - 1, -1, -1):  # Igor Pro: For(i=numPotentialParticles-1;i>=0;i-=1)
+    # Process each potential particle
+    for i in range(numPotentialParticles - 1, -1, -1):
 
-        # Skip overlapping particles if not allowed (Igor Pro lines 315-318)
-        if allowOverlap == 0 and info.data[i, 10] == 0:  # info[i][10] == maximal flag
+        # Skip overlapping particles if not allowed
+        if allowOverlap == 0 and info.data[i, 10] == 0:
             continue
 
-        # Make various cuts to eliminate bad particles (Igor Pro lines 320-323)
+        # Make various cuts to eliminate bad particles
         if (info.data[i, 2] < 1 or  # numPixels < 1
                 (info.data[i, 5] - info.data[i, 4]) < 0 or  # pStop - pStart < 0
                 (info.data[i, 7] - info.data[i, 6]) < 0):  # qStop - qStart < 0
             continue
 
-        # Consider boundary particles (Igor Pro lines 325-328)
-        allowBoundaryParticles = 1  # Hard coded parameter (Igor Pro line 214)
+        # Consider boundary particles
+        allowBoundaryParticles = 1  # Hard coded parameter
         if (allowBoundaryParticles == 0 and
                 (info.data[i, 4] <= 2 or info.data[i, 5] >= im.data.shape[0] - 3 or
                  info.data[i, 6] <= 2 or info.data[i, 7] >= im.data.shape[1] - 3)):
             continue
 
-        # PARTICLE MEASUREMENTS (simplified from Igor Pro lines 330-450)
         # Extract particle region
         p_start, p_stop = int(info.data[i, 4]), int(info.data[i, 5])
         q_start, q_stop = int(info.data[i, 6]), int(info.data[i, 7])
@@ -1042,17 +1003,16 @@ def HessianBlobs(im, scaleStart=1, layers=None, scaleFactor=1.5,
         particle_area = info.data[i, 2]  # numPixels from Info wave
         particle_height = info.data[i, 3]  # maximum blob strength
 
-        # Simple volume calculation (could be enhanced to match Igor Pro exactly)
+        # Simple volume calculation
         particle_volume = particle_area * particle_height
 
-        # Center of mass (simplified)
+        # Center of mass
         com_x = info.data[i, 0]  # P Seed
         com_y = info.data[i, 1]  # Q Seed
 
-        # Average height (simplified)
-        avg_height = particle_height * 0.7  # Approximation
+        # Average height
+        avg_height = particle_height * 0.7
 
-        # APPLY PARTICLE CONSTRAINTS (Igor Pro equivalent)
         # Check height constraints
         if particle_height < minH or particle_height > maxH:
             continue

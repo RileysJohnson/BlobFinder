@@ -1,8 +1,6 @@
 """
 Igor Pro Compatibility Module
 Provides Igor Pro-like functionality for Python implementation
-Direct port maintaining same variable names and function signatures
-FIXED: Enhanced compatibility functions for blob detection
 """
 
 import numpy as np

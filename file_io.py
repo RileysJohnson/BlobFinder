@@ -1,8 +1,6 @@
 """
 File I/O Module
 Handles loading and saving of various image file formats
-Direct port from Igor Pro code maintaining same variable names and structure
-Fixed version with complete IBW support and proper error handling
 """
 
 import numpy as np

@@ -1,9 +1,6 @@
 """
 Scale-Space Module
 Contains functions for scale-space representation and blob detection
-Direct port from Igor Pro code maintaining same variable names and structure
-Complete implementation of scale-space derivatives and blob detectors
-FIXED: Added missing BlobDetectors function and proper Igor Pro compatibility
 """
 
 import numpy as np

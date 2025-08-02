@@ -1,8 +1,6 @@
 """
 Utilities Module
 Contains various utility functions used throughout the blob detection algorithm
-Direct port from Igor Pro code maintaining same variable names and structure
-FIXED: Complete Maxes function implementation and particle type logic
 """
 
 import numpy as np
